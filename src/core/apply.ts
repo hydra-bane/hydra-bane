@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Ledger } from '../ledger/ledger.ts';
@@ -11,6 +12,11 @@ import { measureTree } from './scan.ts';
 // re-measure before acting, never abort the whole plan because one item failed.
 
 const DRIFT = 0.1;
+
+function processRunning(exe: string): boolean {
+  const r = spawnSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tasklist.exe'), ['/fi', `imagename eq ${exe}`, '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+  return (r.stdout ?? '').toLowerCase().includes(`"${exe.toLowerCase()}"`);
+}
 
 export interface ItemOutcome { id: string; target: string; ok: boolean; code?: string; detail?: string; bytes?: number }
 export type ApplyResult =
@@ -49,7 +55,16 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
 
     for (const item of plan.items) {
       const policy = policyFor(ctx, [item.allowRoot]);
+      const running = (item.requiresClosed ?? []).filter((exe) => (ctx.isRunning ?? processRunning)(exe));
+      if (running.length) {
+        for (const target of item.targets) outcomes.push({ id: item.id, target, ok: false, code: 'APP_RUNNING', detail: `close ${running.join(', ')} and apply again` });
+        continue;
+      }
       for (const target of item.targets) {
+        if (item.targetNames && !item.targetNames.includes(path.basename(target))) {
+          outcomes.push({ id: item.id, target, ok: false, code: 'NOT_A_CACHE_FOLDER', detail: `only ${item.targetNames.join(', ')} may be removed` });
+          continue;
+        }
         const now = measureTree(target);
         const expected = item.targets.length === 1 ? item : undefined;
         if (expected && expected.files > 0 && Math.abs(now.files - expected.files) / expected.files > DRIFT) {

@@ -7,6 +7,7 @@ import { apply, starAsked, undo, writePrefs } from './core/apply.ts';
 import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
 import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
+import { explain } from './core/explain.ts';
 import { Ledger } from './ledger/ledger.ts';
 import { human, interactive as analyzeInteractive, listChildren } from './analyze/analyze.ts';
 import { currentUserSid } from './quarantine/quarantine.ts';
@@ -115,7 +116,7 @@ export async function main(argv: string[]): Promise<Exit> {
       const items = scan(ctx, a.only);
       const total = items.reduce((s, i) => s + i.bytes, 0);
       emit(a, 'scan', true, { items, total_bytes: total },
-        [`Found ${gb(total)} reclaimable. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(4)} ${gb(i.bytes).padStart(9)}  ${i.risk === 'caution' ? '[caution] ' : ''}${i.title}`),
+        [`Found ${gb(total)} reclaimable. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(18)} ${gb(i.bytes).padStart(9)}  ${i.risk === 'caution' ? '[caution] ' : ''}${i.title}`),
           items.length ? '\nNext: hydra-bane plan --select <ids>   (or --all-safe)' : ''].join('\n'));
       return 0;
     }
@@ -168,6 +169,15 @@ ${summary}`,
       return bad.length ? 4 : 0;
     }
 
+    case 'explain': {
+      const ctx = context(a);
+      const item = scan(ctx, a.only).find((i) => i.id === a.pos[0]);
+      if (!item) { emit(a, 'explain', false, null, `No item ${a.pos[0] ?? ''} in the current scan.`, { error: { code: 'NOT_FOUND', message: 'run scan to see current ids' } }); return 1; }
+      const e = explain(item);
+      emit(a, 'explain', true, e, [`${e.id}: ${e.title}`, `What: ${e.what}`, `Why it is safe: ${e.why_safe}`, `What happens: ${e.what_happens}`, `How: ${e.how}`, `Size: ${(e.bytes / 2 ** 30).toFixed(2)} GB`, ...e.targets.map((t) => `  ${t}`)].join('\n'));
+      return 0;
+    }
+
     case 'analyze': {
       const dir = path.resolve(a.pos[0] ?? os.homedir());
       if (a.json || !interactive()) {
@@ -202,6 +212,7 @@ ${summary}`,
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
         '  undo   <tx> [--yes]        restore a transaction',
+        '  explain <id>               why an item is safe to clean and what happens after',
         '  analyze [dir]              explore what uses space (read-only, arrow keys)',
         '  (quarantine older than 7 days shows up in scan as Q-xxxxxxxx; purging it is permanent)',
         '  ledger                  verify and show receipts',

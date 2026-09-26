@@ -16,7 +16,9 @@ Always pass `--json` and read the JSON; never parse the human text.
    Each item has `id`, `title`, `bytes`, `risk`, `reversible` (`redownload` = cache, `move-back` = quarantined, undoable).
    Tell the user what you found in plain words: largest items first, sizes in GB, and what happens to each.
 
-2. **Let the user choose.** Ask which items to clean. Suggest the `safe` items; explain `caution` items
+2. **Let the user choose.** When the user asks what an item is, run `hydra-bane explain <id> --json` and relay
+   `what`, `why_safe` and `what_happens`. Browser items need the browser closed (`requires_closed`).
+   Ask which items to clean. Suggest the `safe` items; explain `caution` items
    (for example, old `node_modules` need `npm install` again later). Do not choose for them.
 
 3. **Plan (read-only).**

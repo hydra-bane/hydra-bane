@@ -155,6 +155,46 @@ describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', ()
     expect(fs.existsSync(precious)).toBe(true);
   });
 
+  it('clears browser caches only, never cookies or logins, and only when the browser is closed', async () => {
+    const ud = path.join(ctx.home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data');
+    const put = (rel: string, n = 100) => { const p = path.join(ud, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, 'x'.repeat(n)); return p; };
+    put('Default/Cache/Cache_Data/f_0001', 300);
+    put('Profile 1/Code Cache/js/abc', 200);
+    const cookies = put('Default/Network/Cookies');
+    const login = put('Default/Login Data');
+    const history = put('Default/History');
+
+    const [item] = scan(ctx, ['browser-cache']);
+    expect(item).toMatchObject({ id: 'BROWSER-CHROME', op: 'delete_cache', requiresClosed: ['chrome.exe'], bytes: 500 });
+    expect(item!.targets.map((t) => path.basename(t)).sort()).toEqual(['Cache', 'Code Cache']);
+
+    const running = await apply({ ...ctx, isRunning: () => true }, makePlan(ctx, [item!]).id);
+    expect(running).toMatchObject({ ok: true, outcomes: expect.arrayContaining([expect.objectContaining({ code: 'APP_RUNNING' })]) });
+    expect(fs.existsSync(path.join(ud, 'Default', 'Cache'))).toBe(true);
+
+    const r = await apply({ ...ctx, isRunning: () => false }, makePlan(ctx, [item!]).id);
+    expect(r).toMatchObject({ ok: true, freedNowBytes: 500 });
+    expect(fs.existsSync(path.join(ud, 'Default', 'Cache'))).toBe(false);
+    for (const keep of [cookies, login, history]) expect(fs.existsSync(keep)).toBe(true);
+
+    // A sealed plan that smuggles Login Data into a browser item is refused per target.
+    const evil = await apply({ ...ctx, isRunning: () => false }, makePlan(ctx, [{ ...item!, targets: [login] }]).id);
+    expect(evil).toMatchObject({ ok: true, outcomes: [expect.objectContaining({ ok: false, code: 'NOT_A_CACHE_FOLDER' })] });
+    expect(fs.existsSync(login)).toBe(true);
+  });
+
+  it('finds GPU shader caches and crash dumps', async () => {
+    const la = path.join(ctx.home, 'AppData', 'Local');
+    fs.mkdirSync(path.join(la, 'NVIDIA', 'DXCache'), { recursive: true });
+    fs.writeFileSync(path.join(la, 'NVIDIA', 'DXCache', 'a.bin'), 'x'.repeat(700));
+    fs.mkdirSync(path.join(la, 'CrashDumps'), { recursive: true });
+    fs.writeFileSync(path.join(la, 'CrashDumps', 'app.exe.123.dmp'), 'd'.repeat(50));
+    const items = scan(ctx, ['shader-cache', 'crash-dumps']);
+    expect(items.map((i) => [i.id, i.op, i.reversible])).toEqual([['SHADER-NVIDIA-DX', 'delete_cache', 'redownload'], ['DUMPS', 'quarantine', 'move-back']]);
+    const r = await apply(ctx, makePlan(ctx, items).id);
+    expect(r).toMatchObject({ ok: true, freedNowBytes: 700, quarantinedBytes: 50 });
+  });
+
   it('asks for a star only after the first success', async () => {
     writePrefs(ctx, { star_asked: true });
     const r = await apply(ctx, makePlan(ctx, scan(ctx, ['temp'])).id);

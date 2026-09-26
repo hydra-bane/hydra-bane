@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { Ledger } from '../ledger/ledger.ts';
+import { scanBrowsers, scanCrashDumps, scanShaders } from './apps.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
-export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'node_modules' | 'target' | 'quarantine';
+export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'browser-cache' | 'shader-cache' | 'crash-dumps' | 'node_modules' | 'target' | 'quarantine';
 
 export interface ScanItem {
   id: string;
@@ -17,6 +18,10 @@ export interface ScanItem {
   targets: string[];
   allowRoot: string;
   command?: { file: string; args: string[] };
+  /** If set, apply only touches targets whose folder name is in this list (defense in depth). */
+  targetNames?: string[];
+  /** Executables that must not be running when this item is applied. */
+  requiresClosed?: string[];
   bytes: number;
   files: number;
   risk: 'safe' | 'caution';
@@ -190,10 +195,13 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
   const items = [
     ...(want('temp') ? scanTemp(ctx) : []),
     ...scanCaches(ctx, want),
+    ...(want('browser-cache') ? scanBrowsers(ctx) : []),
+    ...(want('shader-cache') ? scanShaders(ctx) : []),
+    ...(want('crash-dumps') ? scanCrashDumps(ctx) : []),
     ...(want('node_modules') || want('target') ? scanProjects(ctx).filter((i) => want(i.category)) : []),
     ...(want('quarantine') ? scanQuarantine(ctx) : []),
   ];
-  for (const i of items) i.id = stableId(i);
+  for (const i of items) if (!i.id) i.id = stableId(i);
   return items;
 }
 

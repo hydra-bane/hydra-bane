@@ -23,6 +23,8 @@ export interface Context {
   run: (file: string, args: string[]) => { status: number | null; stderr: string };
   /** Where to quarantine an item from this path. Defaults to <drive>:\.hydra-bane-quarantine\<SID>. Tests override it. */
   quarantineBaseFor?: (target: string) => string;
+  /** Whether a process image (e.g. chrome.exe) is running. Defaults to tasklist; tests override it. */
+  isRunning?: (exe: string) => boolean;
 }
 
 export const defaultRoots = (home = os.homedir()) => ['source', 'dev', 'projects', 'repos'].map((d) => path.join(home, d));
