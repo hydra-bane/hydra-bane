@@ -22,7 +22,7 @@ export function parseRegQuery(output: string): RegValue[] {
   return values;
 }
 
-function regQuery(key: string, recursive = false): RegValue[] {
+export function regQuery(key: string, recursive = false): RegValue[] {
   try {
     const out = execFileSync('reg.exe', ['query', key, ...(recursive ? ['/s'] : [])], { encoding: 'utf8', windowsHide: true, timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] });
     return parseRegQuery(out);

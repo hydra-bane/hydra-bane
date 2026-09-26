@@ -16,6 +16,10 @@ const CASES: Array<[string, 'ask' | 'deny' | 'allow']> = [
   ['echo "run: hydra-bane undo <tx> --yes"', 'allow'],
   ['grep -n "hydra-bane apply" README.md', 'allow'],
   ['hydra-bane plan --select C1,T1', 'allow'],
+  ['hydra-bane report P-3fa1c2 --submit --yes --json', 'ask'],
+  ['hydra-bane report P-3fa1c2 --note "came with a game installer" --submit', 'ask'],
+  ['hydra-bane report P-3fa1c2 --json', 'allow'],
+  ['hydra-bane report P-3fa1c2 --no', 'allow'],
 
   [`rm -rf "$(cygpath -u 'C:\\')" 2>/dev/null`, 'deny'], // anthropics/claude-code#95426
   ['rm -rf /c/', 'deny'],

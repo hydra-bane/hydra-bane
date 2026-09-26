@@ -45,6 +45,20 @@ export function describeAction(action: string, id: string | undefined, stateDir 
     const bytes = done.reduce((s, d) => s + (d.bytes ?? 0), 0);
     return clip([`Hydra-bane will restore ${done.length} item(s), ${gb(bytes)}, from quarantine to their original folders:`, ...done.map((d) => `- ${d.target}`)]);
   }
+  if (a === 'report') {
+    let r: { program?: { name?: string; publisher?: string; version?: string }; country?: string; detect?: { signer?: { subject?: string }; file?: { path?: string } } };
+    try { r = JSON.parse(fs.readFileSync(path.join(stateDir, 'reports', `${id}.json`), 'utf8')); } catch {
+      return `Hydra-bane will post a report about program ${id} to github.com/hydra-bane/atlas (public). Run "hydra-bane report ${id}" first to see its contents.`;
+    }
+    return clip([
+      `Hydra-bane will post this report as a PUBLIC issue on github.com/hydra-bane/atlas:`,
+      `- Program: ${r.program?.name ?? '?'} ${r.program?.version ?? ''}${r.program?.publisher ? ` by ${r.program.publisher}` : ''}`,
+      ...(r.detect?.signer?.subject ? [`- Signer: ${r.detect.signer.subject}`] : []),
+      ...(r.detect?.file?.path ? [`- File: ${r.detect.file.path} (with its SHA-256)`] : []),
+      `- Country: ${r.country ?? 'not set'}`,
+      'No user name, PC name or real paths are included.',
+    ]);
+  }
   return `Hydra-bane ${a} ${id}`;
 }
 

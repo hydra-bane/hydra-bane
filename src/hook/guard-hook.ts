@@ -9,6 +9,8 @@ export type Verdict = { decision: 'ask' | 'deny'; reason: string } | undefined;
 // Only an actual invocation counts: at the start of a command segment, optionally via npx or a path.
 // Mentions inside quoted text or heredoc bodies (commit messages, docs) must not trigger a prompt.
 const HB_MUTATING = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(apply|undo|purge)\b(?:\s+([a-z0-9]+))?/i;
+// Sending a report publishes data about this PC, so it gets the same prompt (PLAN.md §7.7).
+const HB_REPORT_SUBMIT = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(report)\s+([\w-]+)\b[^;&|\n]*\s--submit\b/i;
 
 /** Remove heredoc bodies and quoted strings so only the command structure is inspected. */
 export function commandSkeleton(command: string): string {
@@ -42,7 +44,7 @@ const DANGEROUS_TARGET = [
 ];
 
 export function judge(command: string, describe: (action: string, id: string | undefined) => string = describeAction): Verdict {
-  const m = HB_MUTATING.exec(commandSkeleton(command));
+  const m = HB_MUTATING.exec(commandSkeleton(command)) ?? HB_REPORT_SUBMIT.exec(commandSkeleton(command));
   if (m) {
     let what: string;
     try { what = describe(m[1]!, m[2]); } catch { what = `Hydra-bane ${m[1]} ${m[2] ?? ''}`; }

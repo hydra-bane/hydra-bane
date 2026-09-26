@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { apply, starAsked, undo, writePrefs } from './core/apply.ts';
+import { apply, readPrefs, starAsked, undo, writePrefs } from './core/apply.ts';
+import { listPrograms } from './atlas/programs.ts';
+import { buildReport, countryCode, submit } from './atlas/report.ts';
 import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
 import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
@@ -21,16 +23,18 @@ const REPO = 'hydra-bane/hydra-bane';
 
 type Exit = 0 | 1 | 2 | 3 | 4;
 
-interface Args { cmd: string; pos: string[]; json: boolean; only?: Category[]; roots: string[]; select?: string[]; allSafe: boolean; yes: boolean; no: boolean }
+interface Args { cmd: string; pos: string[]; json: boolean; only?: Category[]; roots: string[]; select?: string[]; allSafe: boolean; yes: boolean; no: boolean; submit: boolean; note?: string }
 
 function parse(argv: string[]): Args {
-  const a: Args = { cmd: argv[0] ?? 'help', pos: [], json: false, roots: [], allSafe: false, yes: false, no: false };
+  const a: Args = { cmd: argv[0] ?? 'help', pos: [], json: false, roots: [], allSafe: false, yes: false, no: false, submit: false };
   for (let i = 1; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === '--json') a.json = true;
     else if (v === '--all-safe') a.allSafe = true;
     else if (v === '--yes') a.yes = true;
     else if (v === '--no') a.no = true;
+    else if (v === '--submit') a.submit = true;
+    else if (v === '--note') a.note = argv[++i] ?? '';
     else if (v === '--root') a.roots.push(argv[++i] ?? '');
     else if (v === '--only') a.only = (argv[++i] ?? '').split(',') as Category[];
     else if (v === '--select') a.select = (argv[++i] ?? '').split(',');
@@ -199,6 +203,52 @@ ${summary}`,
       return v.ok ? 0 : 1;
     }
 
+    case 'programs': {
+      const progs = listPrograms();
+      emit(a, 'programs', true, { programs: progs },
+        [`${progs.length} installed program(s). Nothing was changed.`, ...progs.map((p) => `  ${p.id}  ${p.name}${p.version ? ` ${p.version}` : ''}${p.publisher ? `  [${p.publisher}]` : ''}`)].join('\n'));
+      return 0;
+    }
+
+    case 'report': {
+      // PLAN.md §7.7: preview by default; sending needs --submit plus the user's approval.
+      const ctx = context(a);
+      const id = a.pos[0] ?? '';
+      const prog = listPrograms().find((p) => p.id === id);
+      if (!prog) { emit(a, 'report', false, null, `No installed program ${id}. Run: hydra-bane programs`, { error: { code: 'NOT_FOUND', message: 'run programs to see current ids' } }); return 1; }
+      const reported = (readPrefs(ctx).reported ?? {}) as Record<string, { status: string; url?: string }>;
+      const remember = (status: string, url?: string) => writePrefs(ctx, { reported: { ...reported, [id]: { status, ...(url ? { url } : {}) } } });
+      if (a.no) { remember('declined'); emit(a, 'report', true, { id, status: 'declined' }, 'OK, this program will not be suggested for a report again.'); return 0; }
+
+      const report = buildReport(prog, a.note, { version: VERSION, country: countryCode() });
+      fs.mkdirSync(path.join(ctx.stateDir, 'reports'), { recursive: true });
+      fs.writeFileSync(path.join(ctx.stateDir, 'reports', `${id}.json`), JSON.stringify(report, null, 2));
+      const shown = JSON.stringify(report, null, 2);
+      if (!a.submit) {
+        emit(a, 'report', true, { id, report, previous: reported[id] ?? null },
+          `This is everything that would be sent to github.com/hydra-bane/atlas (public). Nothing was sent.\n\n${shown}\n\nSend it with: hydra-bane report ${id} --submit`);
+        return 0;
+      }
+      if (!a.yes) {
+        let ok = false;
+        if (interactive()) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          ok = /^y(es)?$/i.test((await rl.question(`${shown}\n\nPost this as a public issue on github.com/hydra-bane/atlas? [y/N]: `)).trim());
+          rl.close();
+        }
+        if (!ok) {
+          emit(a, 'report', false, { id, report }, `Confirmation required. Show this report to the user, and after they approve run: hydra-bane report ${id} --submit --yes\n\n${shown}`,
+            { error: { code: 'CONFIRMATION_REQUIRED', message: 'show the report to the user, then re-run with --submit --yes' } });
+          return 3;
+        }
+      }
+      const sent = submit(report);
+      remember(sent.via === 'gh' ? 'submitted' : 'link', sent.url);
+      emit(a, 'report', true, { id, via: sent.via, url: sent.url },
+        sent.via === 'gh' ? `Reported: ${sent.url}\nThanks! Maintainers review it before it reaches anyone's PC.` : `Open this link to post the report (a GitHub account is needed):\n${sent.url}`);
+      return 0;
+    }
+
     case 'star': {
       const ctx = context(a);
       const msg = star(a.yes);
@@ -218,6 +268,9 @@ ${summary}`,
         '  analyze [dir]              explore what uses space (read-only, arrow keys)',
         '  (quarantine older than 7 days shows up in scan as Q-xxxxxxxx; purging it is permanent)',
         '  ledger                  verify and show receipts',
+        '  programs                   list installed programs (read-only)',
+        '  report <program-id> [--note <text>] [--submit [--yes]] | --no',
+        '                          preview an Atlas report of an unwanted program; --submit posts it after approval',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;
   }

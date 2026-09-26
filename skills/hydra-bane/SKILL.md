@@ -49,6 +49,21 @@ Say clearly that it is **permanent** and cannot be undone. Nothing is ever purge
 `hydra-bane analyze <dir> --json` lists the largest children of a folder (read-only). Use it to answer
 "what is using my disk?". To free what you find, go back to scan/plan; do not delete it directly.
 
+## Unwanted programs: report to the Atlas (ask once)
+
+When the user wants to get rid of a program they did not want (bundled, adware, "how did this get here?"):
+
+1. `hydra-bane programs --json` and find it by name. Removal itself is not automated yet: point the user to
+   Settings > Apps > Installed apps, and do not improvise uninstall or delete commands.
+2. Unless `hydra-bane report <id> --json` shows `data.previous` (already reported or declined), offer **once**:
+   "Want to report this program to the Hydra-bane Atlas so others can spot it? This is exactly what would be
+   posted publicly:" followed by `data.report` in full. Ask with "Report it" / "Don't report". The user may add a
+   one-line note on how it got installed (`--note "<text>"`).
+3. Only after the user picks Report: `hydra-bane report <id> --submit --yes --json`. If `data.via` is `"link"`,
+   give the user `data.url` to open (it needs a GitHub account). If they decline: `hydra-bane report <id> --no`.
+
+Never send a report without the user's choice in this conversation, and never edit the report to add details.
+
 ## Star prompt (once)
 
 If an `apply` result contains `"hints": {"star_prompt": true}`, ask the user **once**:

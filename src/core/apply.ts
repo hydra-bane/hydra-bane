@@ -26,7 +26,7 @@ export type ApplyResult =
 const ledgerFor = (ctx: Context) => new Ledger(path.join(ctx.stateDir, 'ledger'));
 const prefsFile = (ctx: Context) => path.join(ctx.stateDir, 'prefs.json');
 
-function readPrefs(ctx: Context): Record<string, unknown> {
+export function readPrefs(ctx: Context): Record<string, unknown> {
   try { return JSON.parse(fs.readFileSync(prefsFile(ctx), 'utf8')) as Record<string, unknown>; } catch { return {}; }
 }
 export function writePrefs(ctx: Context, patch: Record<string, unknown>) {
