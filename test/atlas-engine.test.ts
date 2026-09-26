@@ -109,7 +109,7 @@ describe('match', () => {
     const i = items[0]!;
     expect(i).toMatchObject({ id: atlasItemId('kr.example.clipdown', 'P-abc123'), category: 'atlas', op: 'uninstall', risk: 'caution', reversible: 'reinstall-only', bytes: 1024, targets: ['C:\\Program Files\\Clipdown'], allowRoot: 'C:\\Program Files\\Clipdown', needsAdmin: true });
     expect(i.id).toMatch(/^ATLAS-[0-9a-f]{6}$/);
-    expect(i.title).toBe('CLIPDOWN by Example Ads Co.: installed, 1 MB');
+    expect(i.title).toBe('CLIPDOWN by Example Ads Co.: no root certificate, local server or startup service found in its folder');
     expect(i.atlas).toMatchObject({ entryId: 'kr.example.clipdown', context: expect.stringContaining('download helper'), advisories: [] });
     expect(i.instructions).toContain('What it is: A download helper');
     expect(i.uninstall).toEqual({ entryId: 'kr.example.clipdown', kind: 'exe', file: UNINST, args: [], signers: [TP] });

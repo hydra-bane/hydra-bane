@@ -126,8 +126,9 @@ export async function main(argv: string[]): Promise<Exit> {
       const ctx = context(a);
       const items = scan(ctx, a.only);
       const total = items.reduce((s, i) => s + i.bytes, 0);
+      const adminBytes = items.filter((i) => i.needsAdmin && i.op !== 'uninstall' && i.op !== 'report_only').reduce((s, i) => s + i.bytes, 0);
       emit(a, 'scan', true, { items, total_bytes: total },
-        [`Found ${gb(total)} reclaimable${items.some((i) => i.needsAdmin && i.bytes) ? ` (${gb(items.filter((i) => i.needsAdmin).reduce((s, i) => s + i.bytes, 0))} of it needs administrator approval)` : ''}. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(Math.max(18, ...items.map((x) => x.id.length)))} ${gb(i.bytes).padStart(9)}  ${i.risk !== 'safe' ? `[${i.risk}] ` : ''}${i.needsAdmin ? '[admin] ' : ''}${i.op === 'report_only' ? '[report only] ' : ''}${i.title}`),
+        [`Found ${gb(total)} reclaimable${adminBytes ? ` (${gb(adminBytes)} of it needs apply-admin)` : ''}. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(Math.max(18, ...items.map((x) => x.id.length)))} ${gb(i.bytes).padStart(9)}  ${i.risk !== 'safe' ? `[${i.risk}] ` : ''}${i.op === 'uninstall' ? '[vendor uninstaller] ' : i.needsAdmin ? '[admin] ' : ''}${i.op === 'report_only' ? '[report only] ' : ''}${i.title}`),
           items.length ? '\nNext: hydra-bane plan --select <ids>   (or --all-safe)' : ''].join('\n'));
       return 0;
     }

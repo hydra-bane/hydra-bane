@@ -99,7 +99,7 @@ export function atlasItem(p: Program, e: AtlasEntry, deps: UninstallDeps = {}, f
     auto.length && `starts with Windows (service ${auto.map((s) => s.name).join(', ')})`,
     applying.length && `${who(applying[0]!)} advisory ${applying[0]!.date} covers your version${applying.length > 1 ? ` (+${applying.length - 1} more)` : ''}`,
   ].filter((x): x is string => !!x);
-  if (!parts.length) parts.push(`installed${facts.installDate ? ` ${facts.installDate}` : ''}${facts.bytes ? `, ${size(facts.bytes)}` : ''}`);
+  if (!parts.length) parts.push(`no root certificate, local server or startup service found in its folder${facts.installDate ? `; installed ${facts.installDate}` : ''}`);
   const title = `${e.names[0]} by ${e.vendor.name}${p.name !== e.names[0] ? ` (installed as "${p.name}")` : ''}: ${parts.join('; ')}${e.dispute.status === 'open' ? '; vendor dispute open' : ''}`;
 
   const details = [
