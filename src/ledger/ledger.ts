@@ -33,11 +33,13 @@ const hashOf = (r: Omit<LedgerRecord, 'hash'>) => createHash('sha256').update(ca
 export type VerifyResult = { ok: true; count: number; head: string } | { ok: false; brokenAt: number; reason: string };
 
 export class Ledger {
+  readonly dir: string;
   readonly file: string;
   private readonly lockFile: string;
   private lockFd: number | undefined;
 
-  constructor(readonly dir: string) {
+  constructor(dir: string) {
+    this.dir = dir;
     fs.mkdirSync(dir, { recursive: true });
     this.file = path.join(dir, 'ledger.jsonl');
     this.lockFile = path.join(dir, 'ledger.lock');

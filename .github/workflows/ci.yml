@@ -20,3 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: CLI smoke (read-only)
+        run: |
+          node src/cli.ts version
+          node src/cli.ts scan --only temp --json

@@ -85,10 +85,14 @@ function measure(p: string, kind: QuarantinedItem['kind']): Pick<QuarantinedItem
 }
 
 export class Quarantine {
+  readonly base: string;
+  readonly tx: string;
   readonly dir: string;
   private readonly manifest: Manifest;
 
-  constructor(readonly base: string, readonly tx: string = randomUUID()) {
+  constructor(base: string, tx: string = randomUUID()) {
+    this.base = base;
+    this.tx = tx;
     hardenBase(base);
     this.dir = path.join(base, tx);
     fs.mkdirSync(this.dir, { recursive: true });
