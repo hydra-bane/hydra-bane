@@ -203,6 +203,7 @@ ${summary}`,
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
         '  undo   <tx> [--yes]        restore a transaction',
         '  analyze [dir]              explore what uses space (read-only, arrow keys)',
+        '  (quarantine older than 7 days shows up in scan as Q-xxxxxxxx; purging it is permanent)',
         '  ledger                  verify and show receipts',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;

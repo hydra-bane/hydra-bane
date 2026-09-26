@@ -27,6 +27,7 @@ export function describeAction(action: string, id: string | undefined, stateDir 
     for (const i of plan.items) {
       const what = i.op === 'tool_cmd' && i.command ? `runs "${[i.command.file, ...i.command.args].join(' ')}" on ${i.targets[0]} (re-downloadable, not undoable)`
         : i.op === 'delete_cache' ? `deletes ${i.targets[0]} (re-downloadable, not undoable)`
+        : i.op === 'purge_quarantine' ? `PERMANENTLY deletes quarantined files in ${i.targets[0]} (undo window is over; cannot be undone)`
         : `moves ${i.targets.length === 1 ? i.targets[0] : `${i.targets.length} entries in ${path.dirname(i.targets[0]!)}`} to quarantine (undoable)`;
       lines.push(`- ${i.id} ${gb(i.bytes)}: ${what}`);
     }

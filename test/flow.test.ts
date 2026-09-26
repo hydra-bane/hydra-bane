@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { apply, undo, writePrefs } from '../src/core/apply.ts';
 import type { Context } from '../src/core/context.ts';
 import { makePlan } from '../src/core/plan.ts';
-import { scan, type ScanItem } from '../src/core/scan.ts';
+import { measureTree, scan, type ScanItem } from '../src/core/scan.ts';
 import { Ledger } from '../src/ledger/ledger.ts';
 import { describeAction } from '../src/hook/describe.ts';
 
@@ -117,6 +117,42 @@ describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', ()
     const u = describeAction('undo', plan.id, ctx.stateDir);
     expect(u).toContain('restore 2 item(s)');
     expect(u).toContain(path.join(repo, 'node_modules'));
+  });
+
+  it('offers quarantine for purge only after the undo window, purges it permanently, and undo then refuses', async () => {
+    const plan = makePlan(ctx, scan(ctx, ['temp', 'node_modules']));
+    await apply(ctx, plan.id);
+    expect(scan({ ...ctx, now: () => new Date(Date.now() + 3 * 86_400_000) }, ['quarantine'])).toEqual([]);
+
+    const later = { ...ctx, now: () => new Date(Date.now() + 8 * 86_400_000) };
+    const q = scan(later, ['quarantine']);
+    expect(q).toEqual([expect.objectContaining({ id: `Q-${plan.id.slice(0, 8)}`, op: 'purge_quarantine', reversible: 'none' })]);
+    const txDir = q[0]!.targets[0]!;
+    expect(fs.existsSync(txDir)).toBe(true);
+
+    const purgePlan = makePlan(later, q);
+    expect(describeAction('apply', purgePlan.id, ctx.stateDir)).toContain('PERMANENTLY deletes quarantined files');
+    const r = await apply(later, purgePlan.id);
+    expect(r).toMatchObject({ ok: true });
+    expect(r.ok && r.freedNowBytes).toBeGreaterThan(0);
+    expect(fs.existsSync(txDir)).toBe(false);
+    expect(fs.existsSync(path.join(root, 'quarantine', 'README.txt'))).toBe(true); // only the expired tx is removed
+
+    const ledger = new Ledger(path.join(ctx.stateDir, 'ledger'));
+    expect(ledger.verify().ok).toBe(true);
+    expect(ledger.records().some((x) => x.type === 'purged')).toBe(true);
+    expect(await undo(later, plan.id)).toMatchObject({ ok: false, detail: expect.stringContaining('permanently purged') });
+  });
+
+  it('purge cannot reach outside its quarantine base even if the plan target is edited to point elsewhere', async () => {
+    await apply(ctx, makePlan(ctx, scan(ctx, ['temp'])).id);
+    const later = { ...ctx, now: () => new Date(Date.now() + 8 * 86_400_000) };
+    const [item] = scan(later, ['quarantine']);
+    const precious = path.join(root, 'work');
+    const evil = makePlan(later, [{ ...item!, targets: [precious], ...measureTree(precious) }]); // valid hash, sizes match (drift check passes), target outside the base
+    const r = await apply(later, evil.id);
+    expect(r).toMatchObject({ ok: true, outcomes: [expect.objectContaining({ ok: false, code: expect.stringContaining('GUARD') })] });
+    expect(fs.existsSync(precious)).toBe(true);
   });
 
   it('asks for a star only after the first success', async () => {

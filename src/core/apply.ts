@@ -68,10 +68,14 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
           continue;
         }
 
-        if (item.op === 'delete_cache') {
-          // Re-downloadable cache folders with no official clean command (cargo). Guarded like a move;
-          // fs.rmSync removes links as links and never follows them into their targets.
-          const d = decide(target, 'disk', policy);
+        if (item.op === 'delete_cache' || item.op === 'purge_quarantine') {
+          // Permanent deletes: re-downloadable caches with no clean command (cargo), and quarantine past its
+          // undo window (purge capability, confined to that quarantine base). fs.rmSync removes links as links
+          // and never follows them into their targets.
+          const purge = item.op === 'purge_quarantine';
+          const d = purge
+            ? decide(target, 'purge', { protectedPaths: ctx.protectedPaths, allowRoots: { disk: [], atlas: [], purge: [item.allowRoot] } })
+            : decide(target, 'disk', policy);
           const bad = !d.allowed ? `GUARD ${d.code}` : parentIsRedirected(target) ? 'PARENT_IS_LINK' : undefined;
           if (bad) {
             ledger.append(plan.id, 'failed', { item: item.id, target, code: bad });
@@ -81,7 +85,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
           try {
             fs.rmSync(target, { recursive: true, force: false, maxRetries: 2 });
             freedNowBytes += now.bytes;
-            ledger.append(plan.id, 'done', { item: item.id, target, op: 'delete_cache', freed: now.bytes });
+            ledger.append(plan.id, purge ? 'purged' : 'done', { item: item.id, target, op: item.op, freed: now.bytes, ...(purge ? { purgedTx: path.basename(target) } : {}) });
             outcomes.push({ id: item.id, target, ok: true, bytes: now.bytes });
           } catch (e) {
             const code = (e as NodeJS.ErrnoException).code ?? 'IO';
@@ -119,6 +123,8 @@ export async function undo(ctx: Context, tx: string): Promise<UndoResult> {
   const chain = ledger.verify();
   if (!chain.ok) return { ok: false, code: 'LEDGER', detail: `ledger chain broken at ${chain.brokenAt}: ${chain.reason}` };
   const bases = [...new Set(ledger.records().filter((r) => r.tx === tx && r.type === 'done').map((r) => (r.data as { quarantineBase?: string }).quarantineBase).filter((b): b is string => !!b))];
+  const purged = ledger.records().find((r) => r.type === 'purged' && (r.data as { purgedTx?: string }).purgedTx === tx);
+  if (purged) return { ok: false, code: 'NOT_FOUND', detail: `${tx} was permanently purged on ${purged.ts}; it cannot be undone` };
   if (!bases.length) return { ok: false, code: 'NOT_FOUND', detail: `no quarantined items for ${tx}` };
   if (!(await ctx.confirmer.confirm(`Hydra-bane undo ${tx}: restore quarantined items to their original locations`, tx))) return { ok: false, code: 'DECLINED', detail: 'not confirmed' };
 

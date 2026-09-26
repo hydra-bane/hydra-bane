@@ -36,6 +36,12 @@ Always pass `--json` and read the JSON; never parse the human text.
 When the user wants something back: ask first, then `hydra-bane undo <tx> --yes --json`. Report items that could not
 be restored (`STORED_MISSING` usually means antivirus removed it from quarantine).
 
+## Reclaiming quarantined space
+
+Quarantined items keep using disk space until purged. After the 7-day undo window, `scan` lists each old
+quarantine as a `Q-xxxxxxxx` item (`reversible: "none"`). Purging it goes through the same plan → ask → apply loop.
+Say clearly that it is **permanent** and cannot be undone. Nothing is ever purged automatically.
+
 ## Exploring space
 
 `hydra-bane analyze <dir> --json` lists the largest children of a folder (read-only). Use it to answer

@@ -3,23 +3,24 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
+import { Ledger } from '../ledger/ledger.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
-export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'node_modules' | 'target';
+export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'node_modules' | 'target' | 'quarantine';
 
 export interface ScanItem {
   id: string;
   category: Category;
   title: string;
-  op: 'quarantine' | 'tool_cmd' | 'delete_cache';
+  op: 'quarantine' | 'tool_cmd' | 'delete_cache' | 'purge_quarantine';
   targets: string[];
   allowRoot: string;
   command?: { file: string; args: string[] };
   bytes: number;
   files: number;
   risk: 'safe' | 'caution';
-  reversible: 'move-back' | 'redownload';
+  reversible: 'move-back' | 'redownload' | 'none';
 }
 
 const DAY = 86_400_000;
@@ -44,6 +45,32 @@ export function measureTree(p: string): { bytes: number; files: number } {
     }
   }
   return { bytes, files };
+}
+
+export const RETENTION_DAYS = 7;
+
+/** Quarantined transactions past the undo window (PLAN.md §6.6). Nothing is purged automatically. */
+function scanQuarantine(ctx: Context): ScanItem[] {
+  const cutoff = ctx.now().getTime() - RETENTION_DAYS * DAY;
+  const bases = new Set<string>();
+  for (const r of new Ledger(path.join(ctx.stateDir, 'ledger')).records()) {
+    const base = (r.data as { quarantineBase?: string } | null)?.quarantineBase;
+    if (r.type === 'done' && base) bases.add(base);
+  }
+  const items: ScanItem[] = [];
+  for (const base of bases) {
+    let txs: string[] = [];
+    try { txs = fs.readdirSync(base).filter((t) => fs.existsSync(path.join(base, t, 'manifest.json'))); } catch { continue; }
+    for (const tx of txs) {
+      const dir = path.join(base, tx);
+      let createdAt: string;
+      try { createdAt = (JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) as { createdAt: string }).createdAt; } catch { continue; }
+      if (new Date(createdAt).getTime() >= cutoff) continue;
+      const m = measureTree(dir);
+      items.push({ id: '', category: 'quarantine', title: `Quarantine from ${createdAt.slice(0, 10)} (tx ${tx}), undo window over`, op: 'purge_quarantine', targets: [dir], allowRoot: base, ...m, risk: 'caution', reversible: 'none' });
+    }
+  }
+  return items;
 }
 
 function scanTemp(ctx: Context): ScanItem[] {
@@ -154,6 +181,7 @@ function stableId(i: ScanItem): string {
   const fixed = FIXED_ID[i.category];
   if (fixed) return fixed;
   if (i.category === 'cargo-registry') return `CARGO-${path.basename(path.dirname(i.targets[0]!)).toUpperCase()}-${path.basename(i.targets[0]!).toUpperCase()}`;
+  if (i.category === 'quarantine') return `Q-${path.basename(i.targets[0]!).slice(0, 8)}`;
   return pathId(i.category === 'target' ? 'TGT' : 'NM', i.targets[0]!);
 }
 
@@ -163,6 +191,7 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
     ...(want('temp') ? scanTemp(ctx) : []),
     ...scanCaches(ctx, want),
     ...(want('node_modules') || want('target') ? scanProjects(ctx).filter((i) => want(i.category)) : []),
+    ...(want('quarantine') ? scanQuarantine(ctx) : []),
   ];
   for (const i of items) i.id = stableId(i);
   return items;
