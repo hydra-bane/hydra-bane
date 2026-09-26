@@ -8,6 +8,7 @@ import { defaultProtected, defaultRoots, type Context } from './core/context.ts'
 import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
 import { Ledger } from './ledger/ledger.ts';
+import { human, interactive as analyzeInteractive, listChildren } from './analyze/analyze.ts';
 import { currentUserSid } from './quarantine/quarantine.ts';
 
 // PLAN.md §5.2 command contract (v0). JSON envelope on stdout with --json; progress/errors to stderr.
@@ -167,6 +168,17 @@ ${summary}`,
       return bad.length ? 4 : 0;
     }
 
+    case 'analyze': {
+      const dir = path.resolve(a.pos[0] ?? os.homedir());
+      if (a.json || !interactive()) {
+        const rows = listChildren(dir).slice(0, 50);
+        emit(a, 'analyze', true, { path: dir, rows }, rows.map((r) => `${human(r.bytes).padStart(9)}  ${r.link ? `${r.name} (link, not followed)` : r.name}`).join('\n'));
+        return 0;
+      }
+      await analyzeInteractive(dir);
+      return 0;
+    }
+
     case 'ledger': {
       const ctx = context(a);
       const l = new Ledger(path.join(ctx.stateDir, 'ledger'));
@@ -190,6 +202,7 @@ ${summary}`,
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
         '  undo   <tx> [--yes]        restore a transaction',
+        '  analyze [dir]              explore what uses space (read-only, arrow keys)',
         '  ledger                  verify and show receipts',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;
