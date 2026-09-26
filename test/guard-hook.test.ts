@@ -20,6 +20,11 @@ const CASES: Array<[string, 'ask' | 'deny' | 'allow']> = [
   ['hydra-bane report P-3fa1c2 --note "came with a game installer" --submit', 'ask'],
   ['hydra-bane report P-3fa1c2 --json', 'allow'],
   ['hydra-bane report P-3fa1c2 --no', 'allow'],
+  ['hydra-bane apply-admin lx3k9a2b --yes', 'ask'],
+  ['hydra-bane admin-install --yes', 'ask'],
+  ['hydra-bane atlas update', 'allow'],
+  ['hydra-bane recover', 'allow'],
+  ['hydra-bane applyx lx3k9a2b', 'allow'],
 
   [`rm -rf "$(cygpath -u 'C:\\')" 2>/dev/null`, 'deny'], // anthropics/claude-code#95426
   ['rm -rf /c/', 'deny'],

@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import type { Program } from './programs.ts';
+import type { Signer } from './report.ts';
+
 // Atlas entry format (PLAN.md §7.1), stored as one JSON file per entry in hydra-bane/atlas `entries/`.
 // JSON instead of the YAML sketched in the plan: no parser dependency, and the same shape is validated
 // by the atlas repo CI and again by this client (§7.2). There is no shell-command field by design.
@@ -44,7 +48,7 @@ export interface AtlasBundle { schema: 1; bundle_seq: number; created: string; e
 
 const ID = /^[a-z]{2}\.[a-z0-9-]+\.[a-z0-9-]+$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const GUID = /^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$/i;
+export const GUID = /^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$/i;
 // PLAN.md §7.2 lint: verdict words only inside quotes, never in our own fields.
 const VERDICT_WORDS = /\b(malware|virus|scam|spyware|trojan)\b|사기|악성/i;
 const TOP_KEYS = ['schema', 'id', 'names', 'vendor', 'category', 'criteria_refs', 'tags', 'removal_recommendation', 'detect', 'uninstall', 'residue', 'reversible', 'reinstall_note', 'evidence', 'source', 'vendor_response', 'dispute', 'verified', 'verified_by', 'added', 'last_reviewed'];
@@ -96,3 +100,29 @@ export function validateEntry(e: unknown): string[] {
 
 /** Entries with an open dispute are never selected by default (PLAN.md §7.5). */
 export const selectableByDefault = (e: AtlasEntry) => e.dispute.status !== 'open' && e.removal_recommendation === 'recommended';
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Certificate subject pattern with * wildcards, whole-string, case-insensitive. */
+export const subjectMatches = (pattern: string, subject: string) => new RegExp(`^${pattern.split('*').map(escapeRe).join('.*')}$`, 'i').test(subject);
+
+/** DisplayName regex (case-insensitive) and, when the entry names one, the exact Publisher. */
+export function keyMatches(e: AtlasEntry, p: Program): boolean {
+  return e.detect.uninstall_keys.some((k) => {
+    let re: RegExp;
+    try { re = new RegExp(k.display_name, 'i'); } catch { return false; }
+    return re.test(p.name) && (!k.publisher || (p.publisher ?? '').trim().toLowerCase() === k.publisher.trim().toLowerCase());
+  });
+}
+
+/** Upper-case thumbprints the entry pins; the only certificates a vendor uninstaller may be signed with. */
+export const entryThumbprints = (e: AtlasEntry) => e.detect.signers.flatMap((s) => s.thumbprints.map((t) => t.toUpperCase()));
+
+/** A valid Authenticode signature whose thumbprint is pinned or whose subject matches a pattern. */
+export function signerMatches(e: AtlasEntry, s: Signer | undefined): boolean {
+  if (s?.status !== 'Valid') return false;
+  const tp = s.thumbprint?.toUpperCase();
+  return (!!tp && entryThumbprints(e).includes(tp)) || (!!s.subject && e.detect.signers.some((x) => subjectMatches(x.subject, s.subject!)));
+}
+
+/** Stable scan item id: the same entry on the same uninstall key always gets the same id. */
+export const atlasItemId = (entryId: string, programId: string) => `ATLAS-${createHash('sha1').update(`${entryId}|${programId}`).digest('hex').slice(0, 6)}`;

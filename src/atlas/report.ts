@@ -43,7 +43,7 @@ export type SignerOf = (file: string) => Signer | undefined;
 
 export const authenticode: SignerOf = (file) => {
   // Path goes through an environment variable, never through the command text.
-  const ps = "$s = Get-AuthenticodeSignature -LiteralPath $env:HB_FILE; @{status=[string]$s.Status; subject=$s.SignerCertificate.Subject; thumbprint=$s.SignerCertificate.Thumbprint} | ConvertTo-Json -Compress";
+  const ps = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $s = Get-AuthenticodeSignature -LiteralPath $env:HB_FILE; @{status=[string]$s.Status; subject=$s.SignerCertificate.Subject; thumbprint=$s.SignerCertificate.Thumbprint} | ConvertTo-Json -Compress";
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', windowsHide: true, timeout: 30_000, env: { ...process.env, HB_FILE: file } });
   try { const j = JSON.parse(r.stdout) as Signer; return { status: j.status, subject: j.subject ?? undefined, thumbprint: j.thumbprint ?? undefined }; } catch { return undefined; }
 };

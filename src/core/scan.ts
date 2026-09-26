@@ -5,6 +5,10 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import { Ledger } from '../ledger/ledger.ts';
 import { scanBrowsers, scanCrashDumps, scanShaders } from './apps.ts';
+import { ADMIN_CATEGORIES, scanAdmin } from './admin.ts';
+import { scanAtlas } from '../atlas/match.ts';
+import { loadInstalledBundle } from '../atlas/bundle.ts';
+import { scanCachesV02 } from './caches-v02.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
@@ -41,6 +45,8 @@ export interface ScanItem {
   requiresClosed?: string[];
   bytes: number;
   files: number;
+  /** See TreeSize.linkedBytes. */
+  linkedBytes?: number;
   risk: 'safe' | 'caution' | 'danger';
   reversible: 'move-back' | 'redownload' | 'reinstall-only' | 'none';
   /** Must run elevated (PLAN.md §6.7). apply refuses it in a non-elevated process. */
@@ -53,12 +59,32 @@ export interface ScanItem {
 const DAY = 86_400_000;
 export const STALE_DAYS = 30;
 
-export function measureTree(p: string): { bytes: number; files: number } {
-  let bytes = 0, files = 0;
-  let st: fs.Stats;
-  try { st = fs.lstatSync(p); } catch { return { bytes, files }; }
-  if (st.isSymbolicLink()) return { bytes, files };
-  if (!st.isDirectory()) return { bytes: st.size, files: 1 };
+export interface TreeSize {
+  bytes: number;
+  files: number;
+  /** Bytes of files with 2+ hard links (counted once). Links outside the tree may keep them on disk. */
+  linkedBytes?: number;
+}
+
+/** Sizes a tree without following links. Each file identity (dev + NTFS file index) counts once (PLAN.md §3.1). */
+export function measureTree(p: string): TreeSize {
+  let bytes = 0, files = 0, linkedBytes = 0;
+  const seen = new Set<string>();
+  const add = (st: fs.BigIntStats) => {
+    if (st.ino !== 0n) { // 0 = filesystem without file IDs: cannot dedupe
+      const key = `${st.dev}:${st.ino}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+    }
+    files++;
+    bytes += Number(st.size);
+    if (st.nlink >= 2n) linkedBytes += Number(st.size);
+  };
+  const result = (): TreeSize => (linkedBytes ? { bytes, files, linkedBytes } : { bytes, files });
+  let st: fs.BigIntStats;
+  try { st = fs.lstatSync(p, { bigint: true }); } catch { return result(); }
+  if (st.isSymbolicLink()) return result();
+  if (!st.isDirectory()) { add(st); return result(); }
   const stack = [p];
   while (stack.length) {
     const dir = stack.pop()!;
@@ -68,10 +94,10 @@ export function measureTree(p: string): { bytes: number; files: number } {
       if (e.isSymbolicLink()) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) stack.push(full);
-      else { files++; try { bytes += fs.lstatSync(full).size; } catch { /* vanished */ } }
+      else { try { add(fs.lstatSync(full, { bigint: true })); } catch { /* vanished */ } }
     }
   }
-  return { bytes, files };
+  return result();
 }
 
 export const RETENTION_DAYS = 7;
@@ -202,7 +228,7 @@ function scanProjects(ctx: Context): ScanItem[] {
 // IDs must not depend on --only or on what else was found, so an ID seen in one scan means the same
 // item in the next: fixed names for singletons, a short path hash for per-folder items.
 const FIXED_ID: Partial<Record<Category, string>> = { temp: 'TEMP', 'npm-cache': 'NPM', 'pnpm-store': 'PNPM', 'pip-cache': 'PIP', 'uv-cache': 'UV' };
-const pathId = (prefix: string, p: string) => `${prefix}-${createHash('sha1').update(p.toLowerCase()).digest('hex').slice(0, 6)}`;
+export const pathId = (prefix: string, p: string) => `${prefix}-${createHash('sha1').update(p.toLowerCase()).digest('hex').slice(0, 6)}`;
 
 function stableId(i: ScanItem): string {
   const fixed = FIXED_ID[i.category];
@@ -217,11 +243,14 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
   const items = [
     ...(want('temp') ? scanTemp(ctx) : []),
     ...scanCaches(ctx, want),
+    ...scanCachesV02(ctx, want),
     ...(want('browser-cache') ? scanBrowsers(ctx) : []),
     ...(want('shader-cache') ? scanShaders(ctx) : []),
     ...(want('crash-dumps') ? scanCrashDumps(ctx) : []),
     ...(want('node_modules') || want('target') ? scanProjects(ctx).filter((i) => want(i.category)) : []),
     ...(want('quarantine') ? scanQuarantine(ctx) : []),
+    ...(ADMIN_CATEGORIES.some(want) ? scanAdmin({}, only) : []),
+    ...(want('atlas') ? scanAtlas({ bundle: loadInstalledBundle(ctx.stateDir), cacheDir: ctx.stateDir }) : []),
   ];
   for (const i of items) if (!i.id) i.id = stableId(i);
   return items;

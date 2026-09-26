@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { decide, type Capability, type GuardPolicy } from '../guard/decide.ts';
 import { isSameOrDescendant, normalizeWinPath, pathKey } from '../guard/normalize.ts';
+import { killPoint } from '../ledger/ledger.ts';
 
 // PLAN.md §6.6 (v0.1 scope, §6.5 note): move whole items with fs.rename on the same volume, never recurse,
 // never follow links, and re-check links right before moving. No automatic purge.
@@ -19,6 +20,10 @@ export interface QuarantinedItem {
   bytes: number;
   files: number;
   sha256?: string;
+  /** Written before the rename (intent). Cleared once the rename is done. Crash recovery resolves leftovers. */
+  pending?: true;
+  /** Set by restore right after the item is moved back, so an interrupted undo can be re-run safely. */
+  restoredTo?: string;
 }
 
 export interface Manifest { schemaVersion: 1; tx: string; createdAt: string; items: QuarantinedItem[] }
@@ -105,9 +110,7 @@ export class Quarantine {
   }
 
   private flush() {
-    const file = path.join(this.dir, 'manifest.json');
-    fs.writeFileSync(file + '.tmp', JSON.stringify(this.manifest, null, 2));
-    fs.renameSync(file + '.tmp', file);
+    saveManifest(this.base, this.tx, this.manifest);
   }
 
   move(target: string, capability: Capability, policy: GuardPolicy): MoveResult {
@@ -125,19 +128,32 @@ export class Quarantine {
     const id = String(this.manifest.items.length + 1).padStart(4, '0');
     const stored = path.join(this.dir, id);
 
+    const item: QuarantinedItem = { id, source, stored, kind, ...m, pending: true };
+    this.manifest.items.push(item);
+    this.flush();
+    killPoint('quarantine-after-intent');
     try {
       fs.renameSync(source, stored); // same volume: atomic metadata move, links are moved as links
     } catch (e) {
+      this.manifest.items.pop();
+      this.flush();
       const code = (e as NodeJS.ErrnoException).code;
       if (code === 'EXDEV') return { ok: false, code: 'CROSS_VOLUME', detail: source };
       if (code === 'EBUSY' || code === 'EPERM') return { ok: false, code: 'LOCKED', detail: `${source}: ${code}` };
       return { ok: false, code: 'IO', detail: `${source}: ${code}` };
     }
-    const item: QuarantinedItem = { id, source, stored, kind, ...m };
-    this.manifest.items.push(item);
+    killPoint('quarantine-after-rename');
+    delete item.pending;
     this.flush();
     return { ok: true, item };
   }
+}
+
+/** Atomic manifest write (tmp + rename). */
+export function saveManifest(base: string, tx: string, manifest: Manifest) {
+  const file = path.join(base, tx, 'manifest.json');
+  fs.writeFileSync(file + '.tmp', JSON.stringify(manifest, null, 2));
+  fs.renameSync(file + '.tmp', file);
 }
 
 /** Undo a transaction, newest item first. Never overwrites: an occupied source gets a `.restored` name. */
@@ -145,7 +161,9 @@ export function restore(base: string, tx: string, policy?: GuardPolicy): Restore
   const manifest = Quarantine.open(base, tx);
   const out: RestoreOutcome[] = [];
   for (const item of [...manifest.items].reverse()) {
-    if (!fs.existsSync(item.stored) && !isLink(item.stored)) {
+    if (item.restoredTo) { out.push({ id: item.id, ok: true, restoredTo: item.restoredTo }); continue; }
+    if (item.pending && !exists(item.stored)) continue; // interrupted before the move: nothing was taken
+    if (!exists(item.stored)) {
       out.push({ id: item.id, ok: false, code: 'STORED_MISSING', detail: `${item.stored} (removed outside Hydra-bane, possibly by antivirus)` });
       continue;
     }
@@ -161,13 +179,18 @@ export function restore(base: string, tx: string, policy?: GuardPolicy): Restore
     const dest = fs.existsSync(item.source) || isLink(item.source) ? `${item.source}.restored` : item.source;
     try {
       fs.renameSync(item.stored, dest);
+      item.restoredTo = dest;
+      saveManifest(base, tx, manifest);
       out.push({ id: item.id, ok: true, restoredTo: dest });
+      killPoint('undo-after-restore-item');
     } catch (e) {
       out.push({ id: item.id, ok: false, code: 'IO', detail: `${item.source}: ${(e as NodeJS.ErrnoException).code}` });
     }
   }
   return out;
 }
+
+export const exists = (p: string) => fs.existsSync(p) || isLink(p);
 
 function isLink(p: string): boolean {
   try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }

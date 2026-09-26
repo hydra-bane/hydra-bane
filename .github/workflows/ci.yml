@@ -20,6 +20,41 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # PLAN.md §6.11: quarantine, undo and crash injection on a throwaway VHDX mounted as X: (runners are admin).
+      # The runner's C: is not touched by these tests. Locally the tests fall back to the temp folder.
+      - name: 'Mount VHDX test volume (X:)'
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP 'hb-test.vhdx'
+          $script = Join-Path $env:RUNNER_TEMP 'hb-mount.txt'
+          @(
+            "create vdisk file=`"$vhd`" maximum=1024 type=expandable",
+            "select vdisk file=`"$vhd`"",
+            'attach vdisk',
+            'create partition primary',
+            'format fs=ntfs quick label=HBTEST',
+            'assign letter=X'
+          ) | Set-Content -Encoding ascii $script
+          diskpart /s $script
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Volume -DriveLetter X
+      - name: 'Quarantine and crash tests on X:'
+        shell: pwsh
+        env:
+          HYDRA_BANE_TEST_VOLUME: 'X:\'
+        run: |
+          npx vitest run test/crash.test.ts test/quarantine.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'X:\hb-tests')) { Write-Error 'tests did not run on X:'; exit 1 }
+      - name: Detach VHDX
+        if: always()
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP 'hb-test.vhdx'
+          if (-not (Test-Path $vhd)) { exit 0 }
+          $script = Join-Path $env:RUNNER_TEMP 'hb-detach.txt'
+          @("select vdisk file=`"$vhd`"", 'detach vdisk') | Set-Content -Encoding ascii $script
+          diskpart /s $script
       - name: CLI smoke (read-only)
         run: |
           node src/cli.ts version

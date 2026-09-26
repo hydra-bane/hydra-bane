@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { apply, readPrefs, starAsked, undo, writePrefs } from './core/apply.ts';
+import { fileURLToPath } from 'node:url';
+import { apply, readPrefs, recover, starAsked, undo, writePrefs } from './core/apply.ts';
+import { atlasStatus, updateBundle } from './atlas/bundle.ts';
+import { isElevated } from './core/admin.ts';
+import { elevatedApplyCommand, installHelper, launchElevated, parseAdminApplyArgs, readAdminResult, runAdminApply } from './admin/helper.ts';
+import { buildProtectedPaths } from './guard/protected.ts';
 import { listPrograms } from './atlas/programs.ts';
 import { buildReport, countryCode, submit } from './atlas/report.ts';
 import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
@@ -122,7 +127,7 @@ export async function main(argv: string[]): Promise<Exit> {
       const items = scan(ctx, a.only);
       const total = items.reduce((s, i) => s + i.bytes, 0);
       emit(a, 'scan', true, { items, total_bytes: total },
-        [`Found ${gb(total)} reclaimable. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(18)} ${gb(i.bytes).padStart(9)}  ${i.risk === 'caution' ? '[caution] ' : ''}${i.title}`),
+        [`Found ${gb(total)} reclaimable${items.some((i) => i.needsAdmin && i.bytes) ? ` (${gb(items.filter((i) => i.needsAdmin).reduce((s, i) => s + i.bytes, 0))} of it needs administrator approval)` : ''}. Nothing was changed.`, ...items.map((i) => `  ${i.id.padEnd(Math.max(18, ...items.map((x) => x.id.length)))} ${gb(i.bytes).padStart(9)}  ${i.risk !== 'safe' ? `[${i.risk}] ` : ''}${i.needsAdmin ? '[admin] ' : ''}${i.op === 'report_only' ? '[report only] ' : ''}${i.title}`),
           items.length ? '\nNext: hydra-bane plan --select <ids>   (or --all-safe)' : ''].join('\n'));
       return 0;
     }
@@ -249,6 +254,86 @@ ${summary}`,
       return 0;
     }
 
+    case 'mcp': {
+      const { serve } = await import('./mcp/server.ts');
+      await serve(process.stdin, process.stdout);
+      return 0;
+    }
+
+    case 'recover': {
+      const r = recover(context(a));
+      emit(a, 'recover', true, r, JSON.stringify(r, null, 2));
+      return 0;
+    }
+
+    case 'atlas': {
+      const ctx = context(a);
+      if (a.pos[0] === 'update') {
+        const r = await updateBundle(ctx.stateDir);
+        if (!r.ok) { emit(a, 'atlas', false, null, `Atlas not updated: ${r.error}`, { error: { code: 'ATLAS_UPDATE', message: r.error } }); return 1; }
+        emit(a, 'atlas', true, { bundle_seq: r.bundle.bundle_seq, entries: r.bundle.entries.length, dropped: r.dropped },
+          `Atlas bundle ${r.bundle.bundle_seq} installed: ${r.bundle.entries.length} entries (signature verified).${r.dropped.length ? ` Skipped invalid: ${r.dropped.join(', ')}` : ''}\nNext: hydra-bane scan --only atlas`);
+        return 0;
+      }
+      const s = atlasStatus(ctx.stateDir);
+      emit(a, 'atlas', true, s, s.installed ? `Atlas bundle ${s.bundle_seq} (${s.created}), ${s.entries} entries.` : 'atlas: not installed. Run: hydra-bane atlas update');
+      return 0;
+    }
+
+    case 'apply-admin': {
+      // PLAN.md §6.7: the admin items of a plan run only in the admin-only helper, after UAC. The plan hash is on
+      // the elevated command line so the UAC details show it; the helper re-checks everything itself.
+      const ctx = context(a);
+      const l = loadPlan(ctx, a.pos[0] ?? '');
+      if (!l.ok) { emit(a, 'apply-admin', false, null, `Not applied: ${l.code} ${l.detail}`, { error: { code: 'PLAN', message: `${l.code}: ${l.detail}` } }); return 1; }
+      const adminItems = l.plan.items.filter((i) => i.needsAdmin && i.op !== 'report_only' && i.op !== 'uninstall');
+      if (!adminItems.length) { emit(a, 'apply-admin', false, null, 'This plan has no administrator items. Use: hydra-bane apply ' + l.plan.id, { error: { code: 'EMPTY', message: 'no admin items' } }); return 1; }
+      if (!(await ctx.confirmer.confirm(`${summarize({ ...l.plan, items: adminItems })}\n\nWindows will ask for administrator approval.`, l.plan.hash))) {
+        emit(a, 'apply-admin', false, { summary: summarize({ ...l.plan, items: adminItems }) }, `Confirmation required. Ask the user, then run: hydra-bane apply-admin ${l.plan.id} --yes`,
+          { error: { code: 'CONFIRMATION_REQUIRED', message: 'ask the user, then re-run with --yes' } });
+        return 3;
+      }
+      const cmd = elevatedApplyCommand(l.plan.id, l.plan.hash, ctx.sid, { version: VERSION });
+      if (!cmd.ok) { emit(a, 'apply-admin', false, null, `Cannot elevate: ${cmd.code} ${cmd.detail}`, { error: { code: cmd.code, message: cmd.detail } }); return 1; }
+      if (!fs.existsSync(cmd.elevated.args[0]!)) { emit(a, 'apply-admin', false, null, 'The admin-only helper is not installed. Run: hydra-bane admin-install', { error: { code: 'NO_HELPER', message: 'run hydra-bane admin-install first' } }); return 1; }
+      launchElevated(cmd);
+      const res = readAdminResult(l.plan.id, l.plan.hash);
+      if (!res) { emit(a, 'apply-admin', false, null, 'The elevated helper did not report a result (UAC declined, or it failed).', { error: { code: 'NO_RESULT', message: 'no result from the elevated helper' } }); return 1; }
+      const ledger = new Ledger(path.join(ctx.stateDir, 'ledger'));
+      ledger.lock();
+      try { for (const o of res.outcomes) ledger.append(l.plan.id, o.ok ? 'done' : 'failed', { item: o.id, target: o.target, op: 'admin', ...(o.code ? { code: o.code } : {}), ...(o.bytes ? { freed: o.bytes } : {}), elevated: true }); } finally { ledger.unlock(); }
+      const bad = res.outcomes.filter((o) => !o.ok);
+      emit(a, 'apply-admin', true, res, [`Administrator items done: ${res.outcomes.length - bad.length}/${res.outcomes.length}. Nothing here can be undone.`, ...bad.map((b) => `  skipped ${b.id}: ${b.code ?? ''} ${b.detail ?? ''}`)].join('\n'));
+      return bad.length ? 4 : 0;
+    }
+
+    case 'admin-install': {
+      if (isElevated()) {
+        const pkgRoot = fileURLToPath(new URL('..', import.meta.url));
+        const r = await installHelper(VERSION, fs.existsSync(path.join(pkgRoot, 'dist', 'cli.js')) && import.meta.url.includes('/dist/') ? { localRoot: pkgRoot } : {});
+        emit(a, 'admin-install', r.ok, r, r.ok ? `Admin-only helper ${r.reused ? 'already installed' : 'installed'} at ${r.dir} (${r.files} files, verified against the npm registry).` : `Not installed: ${r.code} ${r.detail}`);
+        return r.ok ? 0 : 1;
+      }
+      if (!a.yes && !interactive()) {
+        emit(a, 'admin-install', false, null, 'Confirmation required. Ask the user, then run: hydra-bane admin-install --yes', { error: { code: 'CONFIRMATION_REQUIRED', message: 'installs into C:\\ProgramData with administrator approval' } });
+        return 3;
+      }
+      const self = fileURLToPath(import.meta.url);
+      const ps = `$p = Start-Process -FilePath $env:HB_NODE -ArgumentList @($env:HB_SELF,'admin-install') -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'inherit', env: { ...process.env, HB_NODE: process.execPath, HB_SELF: self.includes(' ') ? `"${self}"` : self } });
+      emit(a, 'admin-install', r.status === 0, { status: r.status }, r.status === 0 ? 'Admin-only helper installed.' : `Admin helper install did not finish (exit ${r.status}).`);
+      return r.status === 0 ? 0 : 1;
+    }
+
+    case 'admin-apply': {
+      // Runs only inside the elevated helper (see apply-admin). Refuses anywhere else.
+      const args = parseAdminApplyArgs(argv.slice(1));
+      if (!args) { process.stderr.write('admin-apply: bad arguments\n'); return 1; }
+      const r = runAdminApply(args, { selfPath: fileURLToPath(import.meta.url), version: VERSION, protectedPaths: buildProtectedPaths });
+      if (!r.ok) process.stderr.write(`admin-apply: ${r.code} ${r.detail}\n`);
+      return r.ok ? 0 : 1;
+    }
+
     case 'star': {
       const ctx = context(a);
       const msg = star(a.yes);
@@ -271,6 +356,11 @@ ${summary}`,
         '  programs                   list installed programs (read-only)',
         '  report <program-id> [--note <text>] [--submit [--yes]] | --no',
         '                          preview an Atlas report of an unwanted program; --submit posts it after approval',
+        '  atlas update | status      download and verify the signed Atlas bundle, or show what is installed',
+        '  apply-admin <plan-id> [--yes]  run the plan\'s administrator items through the admin-only helper (UAC)',
+        '  admin-install [--yes]      install the admin-only helper into C:\\ProgramData (UAC, verified against npm)',
+        '  recover                    finish the ledger of an interrupted apply or undo',
+        '  mcp                        run the read-only MCP server on stdio',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;
   }

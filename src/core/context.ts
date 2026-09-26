@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { GuardPolicy } from '../guard/decide.ts';
 import { buildProtectedPaths } from '../guard/protected.ts';
+import type { RunDeps } from '../atlas/uninstall.ts';
 
 export interface Confirmer {
   /** Ask the human: through the AI agent (--yes after approval) or an interactive terminal (PLAN.md §6.4). */
@@ -25,6 +26,8 @@ export interface Context {
   quarantineBaseFor?: (target: string) => string;
   /** Whether a process image (e.g. chrome.exe) is running. Defaults to tasklist; tests override it. */
   isRunning?: (exe: string) => boolean;
+  /** Overrides for the vendor-uninstaller path (program list, signer lookup, spawn); tests only. */
+  uninstallDeps?: Partial<Omit<RunDeps, 'bundle'>>;
 }
 
 export const defaultRoots = (home = os.homedir()) => ['source', 'dev', 'projects', 'repos'].map((d) => path.join(home, d));

@@ -1,12 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Ledger } from '../ledger/ledger.ts';
+import { killPoint, Ledger, type LedgerRecord, type RecordType } from '../ledger/ledger.ts';
+import { normalizeWinPath, pathKey } from '../guard/normalize.ts';
 import { decide } from '../guard/decide.ts';
-import { defaultQuarantineBase, parentIsRedirected, Quarantine, restore, type RestoreOutcome } from '../quarantine/quarantine.ts';
+import { defaultQuarantineBase, exists, parentIsRedirected, Quarantine, restore, saveManifest, type Manifest, type RestoreOutcome } from '../quarantine/quarantine.ts';
 import { policyFor, type Context } from './context.ts';
 import { loadPlan, summarize, type LoadResult } from './plan.ts';
 import { measureTree } from './scan.ts';
+import { runUninstall } from '../atlas/uninstall.ts';
+import { loadInstalledBundle } from '../atlas/bundle.ts';
 
 // PLAN.md §5.2 apply/undo: confirm inside this process (no stored approvals), write-ahead ledger,
 // re-measure before acting, never abort the whole plan because one item failed.
@@ -40,6 +43,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
   if (!loaded.ok) return { ok: false, code: 'PLAN', detail: `${loaded.code}: ${loaded.detail}` };
   const plan = loaded.plan;
 
+  recover(ctx);
   const ledger = ledgerFor(ctx);
   const chain = ledger.verify();
   if (!chain.ok) return { ok: false, code: 'LEDGER', detail: `ledger chain broken at ${chain.brokenAt}: ${chain.reason}` };
@@ -60,6 +64,26 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
         for (const target of item.targets) outcomes.push({ id: item.id, target, ok: false, code: 'APP_RUNNING', detail: `close ${running.join(', ')} and apply again` });
         continue;
       }
+      if (item.op === 'report_only') {
+        outcomes.push({ id: item.id, target: item.targets[0] ?? '', ok: false, code: 'REPORT_ONLY', detail: item.instructions ?? 'Hydra-bane only reports this item' });
+        continue;
+      }
+      // Admin items never run in this process, elevated or not: only the admin-only helper runs them (PLAN.md §6.7).
+      // Vendor uninstallers are the exception: Windows itself asks for elevation for their signed executable.
+      if (item.needsAdmin && item.op !== 'uninstall') {
+        outcomes.push({ id: item.id, target: item.targets[0] ?? '', ok: false, code: 'NEEDS_ADMIN', detail: `run: hydra-bane apply-admin ${plan.id}` });
+        continue;
+      }
+      if (item.op === 'uninstall') {
+        const target = item.targets[0] ?? '';
+        ledger.append(plan.id, 'planned', { item: item.id, op: item.op, target, bytes: item.bytes });
+        const r = runUninstall(item, { bundle: loadInstalledBundle(ctx.stateDir), ...ctx.uninstallDeps });
+        ledger.append(plan.id, r.ok ? 'done' : 'failed', { item: item.id, target, op: item.op, exitCode: r.code, detail: r.detail, rebootRequired: r.rebootRequired, stillInstalled: r.stillInstalled });
+        const freed = r.ok && !r.stillInstalled ? item.bytes : 0;
+        freedNowBytes += freed;
+        outcomes.push(r.ok ? { id: item.id, target, ok: true, bytes: freed, detail: r.detail } : { id: item.id, target, ok: false, code: 'UNINSTALL_FAILED', detail: r.detail });
+        continue;
+      }
       for (const target of item.targets) {
         if (item.targetNames && !item.targetNames.includes(path.basename(target))) {
           outcomes.push({ id: item.id, target, ok: false, code: 'NOT_A_CACHE_FOLDER', detail: `only ${item.targetNames.join(', ')} may be removed` });
@@ -72,6 +96,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
           continue;
         }
         ledger.append(plan.id, 'planned', { item: item.id, op: item.op, target, bytes: now.bytes });
+        killPoint('after-planned');
 
         if (item.op === 'tool_cmd' && item.command) {
           const r = ctx.run(item.command.file, item.command.args);
@@ -99,6 +124,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
           }
           try {
             fs.rmSync(target, { recursive: true, force: false, maxRetries: 2 });
+            killPoint('after-delete-before-done');
             freedNowBytes += now.bytes;
             ledger.append(plan.id, purge ? 'purged' : 'done', { item: item.id, target, op: item.op, freed: now.bytes, ...(purge ? { purgedTx: path.basename(target) } : {}) });
             outcomes.push({ id: item.id, target, ok: true, bytes: now.bytes });
@@ -115,6 +141,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
         if (!q) { q = new Quarantine(ctx.quarantineBaseFor?.(target) ?? defaultQuarantineBase(target, ctx.sid), plan.id); quarantines.set(drive, q); }
         const moved = q.move(target, 'disk', policy);
         if (moved.ok) {
+          killPoint('after-move-before-done');
           quarantinedBytes += moved.item.bytes;
           ledger.append(plan.id, 'done', { item: item.id, target, stored: moved.item.stored, quarantineBase: q.base, bytes: moved.item.bytes });
           outcomes.push({ id: item.id, target, ok: true, bytes: moved.item.bytes });
@@ -134,6 +161,7 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
 export type UndoResult = { ok: true; outcomes: RestoreOutcome[] } | { ok: false; code: 'NOT_FOUND' | 'DECLINED' | 'LEDGER'; detail: string };
 
 export async function undo(ctx: Context, tx: string): Promise<UndoResult> {
+  recover(ctx);
   const ledger = ledgerFor(ctx);
   const chain = ledger.verify();
   if (!chain.ok) return { ok: false, code: 'LEDGER', detail: `ledger chain broken at ${chain.brokenAt}: ${chain.reason}` };
@@ -151,4 +179,73 @@ export async function undo(ctx: Context, tx: string): Promise<UndoResult> {
   } finally {
     ledger.unlock();
   }
+}
+
+// ---- Crash recovery (PLAN.md §6.6 "resume from the ledger", §6.8 write-ahead) ----
+// A `planned` record with no later done/failed/purged for the same tx+item+target means the process died mid-item.
+// Recovery never moves user data: it looks at reality and appends the record apply would have written, with a
+// `recovered` field, so every existing reader (undo, scan, describe) sees it unchanged. Safe to run at any time.
+
+export interface Recovery {
+  ok: boolean;
+  detail?: string;
+  /** Torn last ledger line that was moved to ledger.jsonl.torn, if there was one. */
+  torn?: string;
+  resolved: { tx: string; item: string; target: string; type: RecordType; reason: string }[];
+}
+
+export function recover(ctx: Context): Recovery {
+  const ledger = ledgerFor(ctx);
+  try { ledger.lock(); } catch (e) { return { ok: false, detail: (e as Error).message, resolved: [] }; }
+  try {
+    const torn = ledger.repairTornTail();
+    const chain = ledger.verify();
+    if (!chain.ok) return { ok: false, detail: `ledger chain broken at ${chain.brokenAt}: ${chain.reason}`, resolved: [], ...(torn ? { torn } : {}) };
+    const key = (r: LedgerRecord) => { const d = r.data as { item?: string; target?: string }; return `${r.tx}\0${d.item}\0${d.target}`; };
+    const open = new Map<string, LedgerRecord>();
+    for (const r of ledger.records()) { if (r.type === 'planned') open.set(key(r), r); else open.delete(key(r)); }
+    const resolved: Recovery['resolved'] = [];
+    for (const p of open.values()) {
+      const { item, op, target } = p.data as { item: string; op: string; target: string };
+      const r = resolveInterrupted(ctx, p.tx, op, target);
+      ledger.append(p.tx, r.type, { item, target, op, ...r.data, recovered: { plannedSeq: p.seq, reason: r.reason } });
+      resolved.push({ tx: p.tx, item, target, type: r.type, reason: r.reason });
+    }
+    return { ok: true, resolved, ...(torn ? { torn } : {}) };
+  } finally {
+    ledger.unlock();
+  }
+}
+
+function resolveInterrupted(ctx: Context, tx: string, op: string, target: string): { type: RecordType; data: Record<string, unknown>; reason: string } {
+  const present = exists(target);
+  if (op === 'quarantine') {
+    const base = ctx.quarantineBaseFor?.(target) ?? defaultQuarantineBase(target, ctx.sid);
+    let m: Manifest | undefined;
+    try { m = Quarantine.open(base, tx); } catch { /* died before the quarantine folder existed */ }
+    const n = normalizeWinPath(target);
+    const want = pathKey(n.ok ? n.path : target);
+    const it = m?.items.find((i) => pathKey(i.source) === want);
+    if (m && it) {
+      // The manifest intent is written before the rename, so the stored copy tells whether the move happened.
+      if (!it.pending || exists(it.stored)) {
+        if (it.pending) { delete it.pending; saveManifest(base, tx, m); }
+        return { type: 'done', data: { stored: it.stored, quarantineBase: base, bytes: it.bytes }, reason: 'moved to quarantine before the interruption' };
+      }
+      m.items = m.items.filter((x) => x !== it);
+      saveManifest(base, tx, m);
+    }
+    return { type: 'failed', data: { code: 'INTERRUPTED' }, reason: present ? 'not moved; still in its original place' : 'not moved, and no longer at its original place (changed outside Hydra-bane)' };
+  }
+  if (op === 'delete_cache') {
+    return present
+      ? { type: 'failed', data: { code: 'INTERRUPTED' }, reason: 'cache deletion was interrupted; it may be partly deleted (re-downloadable)' }
+      : { type: 'done', data: {}, reason: 'cache was deleted before the interruption' };
+  }
+  if (op === 'purge_quarantine') {
+    return present
+      ? { type: 'failed', data: { code: 'INTERRUPTED' }, reason: 'purge was interrupted; part of this quarantine may already be gone' }
+      : { type: 'purged', data: { purgedTx: path.basename(target) }, reason: 'purged before the interruption' };
+  }
+  return { type: 'failed', data: { code: 'INTERRUPTED' }, reason: `${op} was interrupted; its outcome is unknown, run scan again` };
 }

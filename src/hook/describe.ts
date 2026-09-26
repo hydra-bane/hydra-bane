@@ -13,6 +13,9 @@ export const defaultStateDir = () => path.join(process.env.LOCALAPPDATA ?? '', '
 
 export function describeAction(action: string, id: string | undefined, stateDir = defaultStateDir()): string {
   const a = action.toLowerCase();
+  if (a === 'admin-install') return 'Hydra-bane will install its admin-only helper into C:\\ProgramData\\hydra-bane. Windows will ask for administrator approval. The files are checked against the npm registry first.';
+  if (a === 'apply-admin') return `${describeAction('apply', id, stateDir).replace(/^Hydra-bane will apply/, 'Hydra-bane will apply WITH ADMINISTRATOR RIGHTS the admin items of')}
+Windows will ask for administrator approval. These changes cannot be undone.`;
   if (a === 'purge') return 'Hydra-bane will PERMANENTLY delete expired quarantined items. This cannot be undone.';
   if (!id) return `Hydra-bane ${a} without an id; it will fail without changing anything.`;
 

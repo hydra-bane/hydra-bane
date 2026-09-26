@@ -8,7 +8,7 @@ export type Verdict = { decision: 'ask' | 'deny'; reason: string } | undefined;
 
 // Only an actual invocation counts: at the start of a command segment, optionally via npx or a path.
 // Mentions inside quoted text or heredoc bodies (commit messages, docs) must not trigger a prompt.
-const HB_MUTATING = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(apply|undo|purge)\b(?:\s+([a-z0-9]+))?/i;
+const HB_MUTATING = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(apply-admin|admin-install|apply|undo|purge)(?![\w-])(?:\s+([a-z0-9]+))?/i;
 // Sending a report publishes data about this PC, so it gets the same prompt (PLAN.md §7.7).
 const HB_REPORT_SUBMIT = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(report)\s+([\w-]+)\b[^;&|\n]*\s--submit\b/i;
 

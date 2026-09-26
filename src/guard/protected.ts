@@ -22,9 +22,24 @@ export function parseRegQuery(output: string): RegValue[] {
   return values;
 }
 
+// reg.exe writes in the OEM code page (949 on Korean Windows), not UTF-8: decode with it or names turn into mojibake.
+const OEM_LABELS: Record<string, string> = { '949': 'euc-kr', '932': 'shift_jis', '936': 'gbk', '950': 'big5', '65001': 'utf-8', '866': 'ibm866', '1251': 'windows-1251', '1252': 'windows-1252' };
+let oemDecoder: TextDecoder | undefined;
+function decodeOem(b: Buffer): string {
+  if (!oemDecoder) {
+    let label = 'utf-8';
+    try {
+      const out = execFileSync('reg.exe', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'OEMCP'], { encoding: 'latin1', windowsHide: true, timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] });
+      label = OEM_LABELS[/OEMCP\s+REG_SZ\s+(\d+)/.exec(out)?.[1] ?? ''] ?? 'utf-8';
+    } catch { /* keep utf-8 */ }
+    try { oemDecoder = new TextDecoder(label); } catch { oemDecoder = new TextDecoder('utf-8'); }
+  }
+  return oemDecoder.decode(b);
+}
+
 export function regQuery(key: string, recursive = false): RegValue[] {
   try {
-    const out = execFileSync('reg.exe', ['query', key, ...(recursive ? ['/s'] : [])], { encoding: 'utf8', windowsHide: true, timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = decodeOem(execFileSync('reg.exe', ['query', key, ...(recursive ? ['/s'] : [])], { windowsHide: true, timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }));
     return parseRegQuery(out);
   } catch {
     return [];

@@ -1,0 +1,66 @@
+{
+  "recorded_at": "2026-09-26T10:52:23.100Z",
+  "restored_check": true,
+  "events": [
+    {
+      "t": 314,
+      "kind": "cmd",
+      "text": "hydra-bane scan --root .\\work"
+    },
+    {
+      "t": 647,
+      "kind": "out",
+      "text": "Found 4.02 GB reclaimable. Nothing was changed.\n  TEMP                 0.17 GB  Temp files older than 24h (38 entries)\n  CARGO-REGISTRY-CACHE   0.38 GB  cargo registry and git checkouts (registry/cache)\n  NM-dd6435            1.46 GB  [caution] node_modules in web-dashboard (untouched 30+ days)\n  TGT-8f8df8           2.00 GB  [caution] target in ray-tracer (untouched 30+ days)\n\nNext: hydra-bane plan --select <ids>   (or --all-safe)"
+    },
+    {
+      "t": 647,
+      "kind": "cmd",
+      "text": "hydra-bane plan --select TEMP,CARGO-REGISTRY-CACHE,NM-dd6435,TGT-8f8df8"
+    },
+    {
+      "t": 649,
+      "kind": "out",
+      "text": "Plan mui9t0f1cf3e77a8 (f3d07c45), 4 item(s), expires 2026-09-27T10:52:21.469Z.\nNothing was changed. A human applies it with: hydra-bane apply mui9t0f1cf3e77a8"
+    },
+    {
+      "t": 649,
+      "kind": "cmd",
+      "text": "hydra-bane apply mui9t0f1cf3e77a8"
+    },
+    {
+      "t": 651,
+      "kind": "out",
+      "text": "Hydra-bane plan f3d07c45\nReclaim now: 0.38 GB (caches and expired quarantine) | Moved to quarantine: 3.64 GB (undoable for 7 days)\nTEMP Temp files older than 24h (38 entries) - 0.17 GB\nCARGO-REGISTRY-CACHE cargo registry and git checkouts (registry/cache) - 0.38 GB\n[caution] NM-dd6435 node_modules in web-dashboard (untouched 30+ days) - 1.46 GB\n[caution] TGT-8f8df8 target in ray-tracer (untouched 30+ days) - 2.00 GB\n\nApply this plan? [y/N]: "
+    },
+    {
+      "t": 651,
+      "kind": "input",
+      "text": "y"
+    },
+    {
+      "t": 1565,
+      "kind": "out",
+      "text": "Receipt mui9t0f1cf3e77a8: freed 0.38 GB now, quarantined 3.64 GB (undo: hydra-bane undo mui9t0f1cf3e77a8)."
+    },
+    {
+      "t": 1565,
+      "kind": "cmd",
+      "text": "hydra-bane undo mui9t0f1cf3e77a8"
+    },
+    {
+      "t": 1570,
+      "kind": "out",
+      "text": "Hydra-bane undo mui9t0f1cf3e77a8: restore quarantined items to their original locations\n\nApply this plan? [y/N]: "
+    },
+    {
+      "t": 1570,
+      "kind": "input",
+      "text": "y"
+    },
+    {
+      "t": 2277,
+      "kind": "out",
+      "text": "Restored 40 item(s)."
+    }
+  ]
+}

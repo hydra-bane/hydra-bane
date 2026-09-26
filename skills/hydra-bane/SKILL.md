@@ -44,17 +44,43 @@ Quarantined items keep using disk space until purged. After the 7-day undo windo
 quarantine as a `Q-xxxxxxxx` item (`reversible: "none"`). Purging it goes through the same plan → ask → apply loop.
 Say clearly that it is **permanent** and cannot be undone. Nothing is ever purged automatically.
 
+## Administrator items
+
+Items with `needsAdmin: true` (Windows Update downloads, component store, hibernation file, system Temp…) are
+skipped by `apply` with code `NEEDS_ADMIN`. They are permanent; say so. After the user approves, run
+`hydra-bane apply-admin <plan_id> --yes --json`: Windows shows an administrator prompt, and only Hydra-bane's
+admin-only helper runs them. If it answers `NO_HELPER`, ask the user first, then run `hydra-bane admin-install --yes`
+(also an administrator prompt; it verifies the files against the npm registry). Never suggest turning off
+hibernation unless the user wants the space: it also disables Fast Startup.
+
+## After a crash
+
+If apply or undo was interrupted, `hydra-bane recover --json` finishes the receipt from what is actually on disk.
+apply and undo also run it automatically.
+
 ## Exploring space
 
 `hydra-bane analyze <dir> --json` lists the largest children of a folder (read-only). Use it to answer
 "what is using my disk?". To free what you find, go back to scan/plan; do not delete it directly.
 
-## Unwanted programs: report to the Atlas (ask once)
+## Unwanted programs (Atlas)
+
+`hydra-bane atlas status --json` tells whether the signed Atlas catalog is installed. If not, and the user wants
+unwanted programs found, run `hydra-bane atlas update --json` (downloads and verifies the signed bundle).
+The first Atlas scan checks code signatures and can take about 30 seconds; later scans are fast.
+
+`hydra-bane scan --only atlas --json` lists catalog programs found on this PC (category `atlas`). They are never
+`safe`: explain each with `explain <id>` (what it is, the public source, whether a bank or public site may ask to
+reinstall it). Items with `op: "uninstall"` go through the same plan → ask → apply loop: apply runs the vendor's own
+signed uninstaller (Windows may show its administrator prompt and the vendor's window). Items with
+`op: "report_only"` cannot be removed safely by Hydra-bane: give the user `instructions`.
+
+## Unwanted programs not in the Atlas: report (ask once)
 
 When the user wants to get rid of a program they did not want (bundled, adware, "how did this get here?"):
 
-1. `hydra-bane programs --json` and find it by name. Removal itself is not automated yet: point the user to
-   Settings > Apps > Installed apps, and do not improvise uninstall or delete commands.
+1. `hydra-bane programs --json` and find it by name. If it is not an Atlas item, removal is not automated: point
+   the user to Settings > Apps > Installed apps, and do not improvise uninstall or delete commands.
 2. Unless `hydra-bane report <id> --json` shows `data.previous` (already reported or declined), offer **once**:
    "Want to report this program to the Hydra-bane Atlas so others can spot it? This is exactly what would be
    posted publicly:" followed by `data.report` in full. Ask with "Report it" / "Don't report". The user may add a
