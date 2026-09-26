@@ -5,9 +5,8 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { apply, starAsked, undo, writePrefs } from './core/apply.ts';
 import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
-import { makePlan } from './core/plan.ts';
+import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
-import { windowsConfirmer } from './confirm/windows.ts';
 import { Ledger } from './ledger/ledger.ts';
 import { currentUserSid } from './quarantine/quarantine.ts';
 
@@ -45,7 +44,7 @@ function context(a: Args): Context {
     protectedPaths: defaultProtected(),
     sid: currentUserSid(),
     now: () => new Date(),
-    confirmer: windowsConfirmer,
+    confirmer: cliConfirmer(a),
     run: (file, args) => {
       const r = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', [file, ...args].join(' ')], { encoding: 'utf8', windowsHide: true, timeout: 600_000 });
       return { status: r.status, stderr: r.stderr ?? '' };
@@ -59,6 +58,25 @@ function emit(a: Args, command: string, ok: boolean, data: unknown, human: strin
 }
 
 const gb = (b: number) => `${(b / 2 ** 30).toFixed(2)} GB`;
+
+// PLAN.md §6.4 (2026-09-26 CEO decision): the human confirms through the AI agent (the agent shows the plan
+// and asks), or at an interactive terminal. `--yes` records that the human already approved.
+const interactive = () => !!process.stdin.isTTY && !!process.stdout.isTTY;
+
+function cliConfirmer(a: Args): Context['confirmer'] {
+  return {
+    async confirm(summary) {
+      if (a.yes) return true;
+      if (!interactive()) return false;
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const ans = (await rl.question(`${summary}
+
+Apply this plan? [y/N]: `)).trim().toLowerCase();
+      rl.close();
+      return ans === 'y' || ans === 'yes';
+    },
+  };
+}
 
 async function askStar(ctx: Context, freed: number) {
   if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.HYDRA_BANE_NO_PROMPTS === '1') return;
@@ -106,6 +124,15 @@ export async function main(argv: string[]): Promise<Exit> {
 
     case 'apply': {
       const ctx = context(a);
+      if (!a.yes && !interactive()) {
+        const l = loadPlan(ctx, a.pos[0] ?? '');
+        const summary = l.ok ? summarize(l.plan) : '';
+        emit(a, 'apply', false, { summary }, `Confirmation required. Show this plan to the user, and after they approve run: hydra-bane apply ${a.pos[0] ?? '<plan-id>'} --yes
+
+${summary}`,
+          { error: { code: 'CONFIRMATION_REQUIRED', message: 'ask the user to approve this plan, then re-run with --yes' } });
+        return 3;
+      }
       const r = await apply(ctx, a.pos[0] ?? '');
       if (!r.ok) {
         emit(a, 'apply', false, null, `Not applied: ${r.code} ${r.detail}`, { error: { code: r.code, message: r.detail } });
@@ -122,6 +149,10 @@ export async function main(argv: string[]): Promise<Exit> {
 
     case 'undo': {
       const ctx = context(a);
+      if (!a.yes && !interactive()) {
+        emit(a, 'undo', false, null, `Confirmation required. Ask the user, then run: hydra-bane undo ${a.pos[0] ?? '<tx>'} --yes`, { error: { code: 'CONFIRMATION_REQUIRED', message: 'ask the user, then re-run with --yes' } });
+        return 3;
+      }
       const r = await undo(ctx, a.pos[0] ?? '');
       if (!r.ok) { emit(a, 'undo', false, null, `Not undone: ${r.code} ${r.detail}`, { error: { code: r.code, message: r.detail } }); return r.code === 'DECLINED' ? 3 : 1; }
       const bad = r.outcomes.filter((o) => !o.ok);
@@ -149,8 +180,8 @@ export async function main(argv: string[]): Promise<Exit> {
       process.stdout.write(['hydra-bane — safe Windows cleanup for humans and AI agents', '',
         '  scan   [--only temp,npm-cache,node_modules,target] [--root <dir>]...   find reclaimable space (read-only)',
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
-        '  apply  <plan-id>        confirm with Windows Hello / UAC, quarantine, write receipts',
-        '  undo   <tx>             restore a transaction',
+        '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
+        '  undo   <tx> [--yes]        restore a transaction',
         '  ledger                  verify and show receipts',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;

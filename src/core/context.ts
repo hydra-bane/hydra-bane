@@ -4,7 +4,7 @@ import type { GuardPolicy } from '../guard/decide.ts';
 import { buildProtectedPaths } from '../guard/protected.ts';
 
 export interface Confirmer {
-  /** Ask the human. Must not be answerable by the calling agent (PLAN.md §6.4). */
+  /** Ask the human: through the AI agent (--yes after approval) or an interactive terminal (PLAN.md §6.4). */
   confirm(summary: string, planHash: string): Promise<boolean>;
 }
 

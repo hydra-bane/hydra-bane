@@ -10,7 +10,7 @@ Hydra-bane is a Windows cleanup and hygiene CLI built for AI coding agents (Clau
 - **Atlas**: a community-maintained, per-country catalog of bundled and hard-to-remove software.
 - **Threat**: evidence-based persistence and signature checks. It is not an antivirus.
 
-It makes one promise: **nothing on your PC changes until you confirm, and every change leaves a receipt you can undo.**
+It makes one promise: **nothing on your PC changes until you approve a sealed plan, and every change leaves a receipt you can undo.** Your AI agent shows you the plan and asks before applying it. An agent running in auto-approve mode can approve on its own, so keep approvals on for `hydra-bane apply`.
 
 - Feasibility spikes (Win32 via koffi, Windows Hello availability, traversal speed): [spikes/](spikes/)
 - License: code [Apache-2.0](LICENSE). The Atlas data will ship separately under CC BY-SA 4.0. Name usage: [TRADEMARK.md](TRADEMARK.md).
