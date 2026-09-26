@@ -82,6 +82,10 @@ scan  ->  plan  ->  you approve  ->  apply  ->  receipt  ->  undo (7 days)
 
 Not sure about an item? `hydra-bane explain <id>` says why it is safe and what happens afterwards.
 
+## Report unwanted programs
+
+Found something on your PC you never asked for? When you ask your agent to get rid of it, Hydra-bane offers to report it to the [Atlas](https://github.com/hydra-bane/atlas), a per-country catalog of bundled and hard-to-remove software. You see exactly what would be posted first: name, publisher, code signer, file hash and `%VAR%`-relative paths. It never includes your user name, PC name or real paths, and nothing is sent unless you say yes. A bot collects reports into one candidate pull request per program for maintainers to review.
+
 ## Why not just let my agent `rm -rf`?
 
 Your agent can already delete files. The problem is that nobody knows what it deleted until it is gone.
@@ -124,6 +128,8 @@ Every command accepts `--json` and returns `{schema_version, command, ok, data, 
 | `explain <id>` | Why an item is safe to clean | No |
 | `analyze [dir]` | Browse what uses space (arrow keys) | No |
 | `ledger` | Verify and list receipts | No |
+| `programs` | List installed programs | No |
+| `report <program-id>` | Preview an Atlas report of an unwanted program; `--submit` posts it after you approve | Only with `--submit` |
 
 ## Roadmap
 
