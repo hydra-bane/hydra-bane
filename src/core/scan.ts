@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -144,7 +145,17 @@ function scanProjects(ctx: Context): ScanItem[] {
   return items;
 }
 
-const PREFIX: Record<Category, string> = { temp: 'T', 'npm-cache': 'C', 'pnpm-store': 'C', 'pip-cache': 'C', 'uv-cache': 'C', 'cargo-registry': 'C', node_modules: 'P', target: 'P' };
+// IDs must not depend on --only or on what else was found, so an ID seen in one scan means the same
+// item in the next: fixed names for singletons, a short path hash for per-folder items.
+const FIXED_ID: Partial<Record<Category, string>> = { temp: 'TEMP', 'npm-cache': 'NPM', 'pnpm-store': 'PNPM', 'pip-cache': 'PIP', 'uv-cache': 'UV' };
+const pathId = (prefix: string, p: string) => `${prefix}-${createHash('sha1').update(p.toLowerCase()).digest('hex').slice(0, 6)}`;
+
+function stableId(i: ScanItem): string {
+  const fixed = FIXED_ID[i.category];
+  if (fixed) return fixed;
+  if (i.category === 'cargo-registry') return `CARGO-${path.basename(path.dirname(i.targets[0]!)).toUpperCase()}-${path.basename(i.targets[0]!).toUpperCase()}`;
+  return pathId(i.category === 'target' ? 'TGT' : 'NM', i.targets[0]!);
+}
 
 export function scan(ctx: Context, only?: Category[]): ScanItem[] {
   const want = (c: Category) => !only || only.includes(c);
@@ -153,12 +164,7 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
     ...scanCaches(ctx, want),
     ...(want('node_modules') || want('target') ? scanProjects(ctx).filter((i) => want(i.category)) : []),
   ];
-  const counters: Record<string, number> = {};
-  for (const i of items) {
-    const p = PREFIX[i.category];
-    counters[p] = (counters[p] ?? 0) + 1;
-    i.id = `${p}${counters[p]}`;
-  }
+  for (const i of items) i.id = stableId(i);
   return items;
 }
 

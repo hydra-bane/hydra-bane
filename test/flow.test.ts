@@ -54,8 +54,16 @@ afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', () => {
   it('finds only eligible items', () => {
     const items = scan(ctx, ['temp', 'node_modules']);
-    expect(items.map((i) => [i.id, i.category])).toEqual([['T1', 'temp'], ['P1', 'node_modules']]);
+    expect(items.map((i) => i.category)).toEqual(['temp', 'node_modules']);
+    expect(items[0]!.id).toBe('TEMP');
+    expect(items[1]!.id).toMatch(/^NM-[0-9a-f]{6}$/);
     expect(items[0]!.targets).toEqual([path.join(ctx.tempDir, 'old.tmp')]);
+  });
+
+  it('gives the same ID to an item whatever else is scanned (--only must not renumber)', () => {
+    const all = scan(ctx, ['temp', 'node_modules']);
+    const onlyNm = scan(ctx, ['node_modules']);
+    expect(onlyNm[0]!.id).toBe(all.find((i) => i.category === 'node_modules')!.id);
   });
 
   it('skips node_modules that is recent or tracked by git', () => {
@@ -128,7 +136,7 @@ describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', ()
     fs.mkdirSync(pip);
     fs.writeFileSync(path.join(pip, 'wheel'), 'w'.repeat(100));
     const items = scan({ ...ctx, locate: (cmd) => (cmd === 'pip cache dir' ? pip : undefined) }, ['pip-cache', 'npm-cache']);
-    expect(items).toEqual([expect.objectContaining({ id: 'C1', category: 'pip-cache', op: 'tool_cmd', targets: [pip], allowRoot: pip, command: { file: 'pip', args: ['cache', 'purge'] } })]);
+    expect(items).toEqual([expect.objectContaining({ id: 'PIP', category: 'pip-cache', op: 'tool_cmd', targets: [pip], allowRoot: pip, command: { file: 'pip', args: ['cache', 'purge'] } })]);
   });
 
   it('deletes cargo registry folders directly, never ~/.cargo/bin, and never follows a junction inside', async () => {
