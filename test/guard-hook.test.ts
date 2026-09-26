@@ -32,6 +32,15 @@ const CASES: Array<[string, 'ask' | 'deny' | 'allow']> = [
   ['robocopy C:\\empty C:\\Users\\alice /MIR', 'deny'],
   ['Remove-Item -Recurse "C:\\Program Files\\App"', 'deny'],
 
+  // quoted text is not a command...
+  [`echo '{"tool_input":{"command":"rm -rf /c/"}}' | node run.js`, 'allow'],
+  ['git commit -m "block rm -rf C:\\ in the hook"', 'allow'],
+  // ...unless a nested shell executes it
+  ['bash -c "rm -rf /"', 'deny'],
+  ['cmd /c "rd /s /q C:\\"', 'deny'],
+  [`node -e "require('fs').rmSync(process.env.USERPROFILE,{recursive:true})"`, 'deny'],
+  ['rm -rf "$SP"', 'deny'],
+
   ['rm -rf node_modules', 'allow'],
   ['rm -rf ./dist build', 'allow'],
   ['Remove-Item -Recurse -Force .\\target', 'allow'],

@@ -29,3 +29,13 @@ jobs:
         run: |
           out=$(echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /c/"}}' | node src/hook/run.ts)
           echo "$out" | grep -q '"permissionDecision":"deny"'
+      - name: Package smoke (npm pack -> install -> npx)
+        shell: bash
+        run: |
+          npm run build
+          tgz=$(npm pack | tail -1)
+          mkdir -p "$RUNNER_TEMP/sim" && cd "$RUNNER_TEMP/sim"
+          npm init -y > /dev/null
+          npm i --no-audit --no-fund "$GITHUB_WORKSPACE/$tgz"
+          npx hydra-bane version
+          npx hydra-bane scan --only temp --json

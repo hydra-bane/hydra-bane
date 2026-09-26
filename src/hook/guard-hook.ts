@@ -16,7 +16,8 @@ export function commandSkeleton(command: string): string {
   s = s.replace(/'[^']*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
   return s.trim();
 }
-const OPAQUE = /\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc(?:odedcommand)?)?\s/i; // payload the hook cannot read
+const NESTED_SHELL = /\b(?:bash|sh|zsh|dash|cmd|powershell|pwsh|node|python3?|wsl)(?:\.exe)?\b[^|;&]*\s(?:-c|\/c|\/k|-command|-e|--eval)\b/i;
+const OPAQUE =/\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc(?:odedcommand)?)?\s/i; // payload the hook cannot read
 
 const RECURSIVE_DELETE = [
   /\brm\s+(?:-[a-z]*r[a-z]*|--recursive)\b/i,           // rm -r / -rf / -fr / --recursive
@@ -25,13 +26,14 @@ const RECURSIVE_DELETE = [
   /\b(?:remove-item|ri|rm|del|erase|rd|rmdir)\b[^|;&]*\s-r(?:ecurse)?\b/i, // PowerShell Remove-Item -Recurse and aliases
   /\brobocopy\b[^|;&]*\s\/mir\b/i,
   /\bgit\s+clean\s+-[a-z]*[fdx][a-z]*/i,
-  /\bshutil\.rmtree\b|\bfs\.rm(?:Sync)?\s*\([^)]*recursive/i,
+  /\bshutil\.rmtree\b|\.rm(?:dir)?(?:Sync)?\s*\([^)]*recursive/i,    // python shutil, node fs.rm/rmdir(…, {recursive})
 ];
 
 // Targets whose resolution the hook cannot trust, or that are always catastrophic.
 const DANGEROUS_TARGET = [
   /\$\(|`/,                                  // command substitution (anthropics/claude-code#95426)
   /%[a-z_]+%|\$env:|\$\{?[a-z_]+\}?/i,        // variables expanded at runtime
+  /process\.env\.|os\.homedir\(\)|expanduser\(|Path\.home\(\)|os\.environ/i, // same, from inside node/python one-liners
   /-enc(?:odedcommand)?\b/i,
   /(?:^|[\s"'])(?:[a-z]:[\\/]?|\/[a-z]\/?|\/mnt\/[a-z]\/?|\/cygdrive\/[a-z]\/?|~[\\/]?|\/)(?=$|[\s"'])/i, // drive/home roots
   /[\\/]users[\\/][^\\/\s"']+[\\/]?(?=$|[\s"'])/i,                                                // a whole profile
@@ -49,7 +51,12 @@ export function judge(command: string, describe: (action: string, id: string | u
   if (OPAQUE.test(command)) {
     return { decision: 'ask', reason: 'This PowerShell command is encoded, so its contents cannot be checked. Ask the user before running it.' };
   }
-  if (RECURSIVE_DELETE.some((r) => r.test(command)) && DANGEROUS_TARGET.some((r) => r.test(command))) {
+  // The delete verb must be an actual command, not text inside quotes (echo, JSON, commit messages),
+  // unless the quotes are themselves executed by a nested shell (bash -c "...", cmd /c "...").
+  // Targets are still read from the raw command, because a quoted path is still the path being deleted.
+  const skeleton = commandSkeleton(command);
+  const verbScope = NESTED_SHELL.test(skeleton) ? command : skeleton;
+  if (RECURSIVE_DELETE.some((r) => r.test(verbScope)) && DANGEROUS_TARGET.some((r) => r.test(command))) {
     return {
       decision: 'deny',
       reason: 'Blocked by Hydra-bane: recursive delete of a drive root, profile, system or known folder, or of a path computed at runtime. Use `hydra-bane scan` and `hydra-bane plan` instead, which show the resolved paths and can be undone.',

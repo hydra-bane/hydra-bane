@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
@@ -13,7 +14,8 @@ import { human, interactive as analyzeInteractive, listChildren } from './analyz
 import { currentUserSid } from './quarantine/quarantine.ts';
 
 // PLAN.md §5.2 command contract (v0). JSON envelope on stdout with --json; progress/errors to stderr.
-export const VERSION = '0.0.0';
+// package.json sits one level above both src/cli.ts and dist/cli.js.
+export const VERSION: string = (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 export const API_LEVEL = 0;
 const REPO = 'hydra-bane/hydra-bane';
 
