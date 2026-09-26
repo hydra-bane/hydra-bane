@@ -1,0 +1,10 @@
+{
+  "name": "hydra-bane",
+  "version": "0.0.0",
+  "description": "Safe Windows cleanup for AI agents: scan, sealed plan, you approve, quarantine, undoable receipts. Blocks common recursive deletes of drive roots and profiles.",
+  "author": { "name": "hydra-bane", "url": "https://github.com/hydra-bane" },
+  "homepage": "https://github.com/hydra-bane/hydra-bane",
+  "repository": "https://github.com/hydra-bane/hydra-bane",
+  "license": "Apache-2.0",
+  "keywords": ["windows", "cleanup", "disk", "safety", "undo"]
+}

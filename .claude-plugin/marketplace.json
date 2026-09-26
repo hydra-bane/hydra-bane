@@ -1,0 +1,14 @@
+{
+  "name": "hydra-bane",
+  "description": "Hydra-bane: safe Windows cleanup for AI coding agents.",
+  "owner": {
+    "name": "hydra-bane"
+  },
+  "plugins": [
+    {
+      "name": "hydra-bane",
+      "source": "./",
+      "description": "Safe Windows cleanup for AI agents with sealed plans, approvals and undoable receipts."
+    }
+  ]
+}

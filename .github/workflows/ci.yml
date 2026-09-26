@@ -24,3 +24,8 @@ jobs:
         run: |
           node src/cli.ts version
           node src/cli.ts scan --only temp --json
+      - name: Guard hook smoke
+        shell: bash
+        run: |
+          out=$(echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /c/"}}' | node src/hook/run.ts)
+          echo "$out" | grep -q '"permissionDecision":"deny"'

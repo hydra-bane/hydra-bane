@@ -5,7 +5,7 @@
   "description": "Windows cleanup & hygiene CLI for AI coding agents. Nothing changes until you confirm; every change leaves an undoable receipt.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.18" },
   "os": ["win32"],
   "scripts": {
     "typecheck": "tsc --noEmit",
