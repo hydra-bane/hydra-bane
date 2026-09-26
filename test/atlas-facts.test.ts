@@ -98,7 +98,7 @@ describe('atlas item text', () => {
     expect(i.atlas!.advisories.map((a) => a.applies)).toEqual(['applies', 'not-applicable', 'unknown']);
     const text = i.instructions!;
     expect(text).toContain('KISA 2023-02-01: "Vulnerable Veraport versions" https://example.org/kisa. Covers your version 3,8,0,0');
-    expect(text).toContain('NVD 2020-05-01: "Old issue" (CVE-2020-1234) https://example.org/nvd. Does not cover your version 3,8,0,0: your version is newer than the fixed version 3.1.');
+    expect(text).toContain('NVD 2020-05-01: "Old issue" (CVE-2020-1234) https://example.org/nvd. Does not cover your version 3,8,0,0 (the advisory covers versions before 3.1).');
     expect(text).toContain('The advisory names no version range.');
     expect(text).toContain('What it is: Installs and updates');
     expect(text).toContain('If you need it again: Banking sites');
@@ -116,5 +116,27 @@ describe('atlas item text', () => {
       expect(i.title).not.toMatch(VERDICT_WORDS);
       expect(i.instructions!.replace(/"[^"]*"/g, '')).not.toMatch(VERDICT_WORDS);
     }
+  });
+});
+
+describe('advisory version scopes', () => {
+  it('handles lower bounds and version lists as published', async () => {
+    const { advisoryApplies, validateEntry } = await import('../src/atlas/entry.ts');
+    const base = { publisher: 'KISA' as const, url: 'https://example.org/a', date: '2026-06-01', title: 't' };
+    const range = { ...base, affected: { from: '1.1.4.4', up_to: '1.1.4.6', inclusive: true } };
+    expect(advisoryApplies(range, '1.1.4.3')).toBe('not-applicable');
+    expect(advisoryApplies(range, '1.1.4.5')).toBe('applies');
+    expect(advisoryApplies(range, '1.1.4.6')).toBe('applies');
+    expect(advisoryApplies(range, '1.1.4.7')).toBe('not-applicable');
+    const list = { ...base, affected: { versions: ['1.1.1.0', '1.1.2.6'] } };
+    expect(advisoryApplies(list, 'AnySign4PC 1.1.2.6')).toBe('applies');
+    expect(advisoryApplies(list, '1.1.2.7')).toBe('not-applicable');
+    expect(advisoryApplies(list, undefined)).toBe('unknown');
+    const bad = (affected: object) => validateEntry({ advisories: [{ ...base, affected }] }).some((x) => x.startsWith('advisory.affected'));
+    expect(bad({ versions: ['1.0'], up_to: '2.0', inclusive: true })).toBe(true);
+    expect(bad({ from: '1.0' })).toBe(true);
+    expect(bad({ up_to: '2.0' })).toBe(true);
+    expect(bad({ versions: [] })).toBe(true);
+    expect(bad({ from: '1.0', up_to: '2.0', inclusive: false })).toBe(false);
   });
 });

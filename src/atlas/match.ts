@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ScanItem } from '../core/scan.ts';
-import { advisoryApplies, atlasItemId, keyMatches, signerMatches, type Advisory, type Applies, type AtlasBundle, type AtlasEntry } from './entry.ts';
+import { advisoryApplies, atlasItemId, describeAffected, keyMatches, signerMatches, type Advisory, type Applies, type AtlasBundle, type AtlasEntry } from './entry.ts';
 import { measureFacts, type FactsRunner, type ProgramFacts } from './facts.ts';
 import { listPrograms as defaultListPrograms, UNINSTALL_ROOTS, type Program } from './programs.ts';
 import { mainExecutable, type Signer } from './report.ts';
@@ -75,10 +75,10 @@ const emptyFacts = (p: Program): ProgramFacts => ({ version: p.version, installD
 
 function advisoryLine(a: Advisory & { applies: Applies }, version: string | undefined): string {
   const head = `${who(a)} ${a.date}: "${a.title}"${a.cve?.length ? ` (${a.cve.join(', ')})` : ''}${a.kev ? ' [in CISA Known Exploited Vulnerabilities]' : ''} ${a.url}`;
-  const range = a.affected && `${a.affected.inclusive ? 'up to and including' : 'before'} ${a.affected.up_to}`;
-  if (a.applies === 'applies') return `${head}. Covers your version ${version} (the advisory covers versions ${range}).`;
-  if (a.applies === 'not-applicable') return `${head}. Does not cover your version ${version}: your version is newer than the ${a.affected!.inclusive ? 'last affected' : 'fixed'} version ${a.affected!.up_to}.`;
-  return `${head}. ${a.affected ? `Your installed version could not be read; the advisory covers versions ${range}.` : 'The advisory names no version range.'}`;
+  const range = a.affected && describeAffected(a.affected);
+  if (a.applies === 'applies') return `${head}. Covers your version ${version} (the advisory covers ${range}).`;
+  if (a.applies === 'not-applicable') return `${head}. Does not cover your version ${version} (the advisory covers ${range}).`;
+  return `${head}. ${a.affected ? `Your installed version could not be read; the advisory covers ${range}.` : 'The advisory names no version range.'}`;
 }
 
 const who = (a: Advisory) => (a.publisher === 'other' ? 'third-party' : a.publisher);

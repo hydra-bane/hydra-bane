@@ -18,8 +18,11 @@ export interface Advisory {
   title: string;
   /** CVE ids, when the advisory has them. */
   cve?: string[];
-  /** Versions the advisory covers. Omitted: the advisory names no version range. */
-  affected?: { up_to: string; inclusive: boolean };
+  /**
+   * Versions the advisory covers, as published: a range (optional inclusive lower bound `from`, upper bound `up_to`)
+   * or a list of individual `versions`. Omitted: the advisory names no versions.
+   */
+  affected?: { from?: string; up_to?: string; inclusive?: boolean; versions?: string[] };
   /** Listed in CISA's Known Exploited Vulnerabilities catalog. */
   kev?: boolean;
 }
@@ -109,7 +112,12 @@ export function validateEntry(e: unknown): string[] {
   else for (const a of x.advisories) {
     if (!(ADVISORY_PUBLISHERS as readonly string[]).includes(a?.publisher) || !https(a.url) || !DATE.test(a.date ?? '') || typeof a.title !== 'string' || !a.title) { p.push('advisory needs publisher, https url, date and title'); continue; }
     if (a.cve !== undefined && (!Array.isArray(a.cve) || !a.cve.every((c: any) => /^CVE-\d{4}-\d{4,}$/.test(c)))) p.push('advisory.cve');
-    if (a.affected !== undefined && (typeof a.affected.up_to !== 'string' || !VERSION.test(a.affected.up_to) || typeof a.affected.inclusive !== 'boolean')) p.push('advisory.affected needs up_to (digits and dots) and inclusive');
+    if (a.affected !== undefined) {
+      const f = a.affected, ver = (v: unknown) => typeof v === 'string' && VERSION.test(v);
+      const list = Array.isArray(f.versions) && f.versions.length > 0 && f.versions.every(ver);
+      const range = ver(f.up_to) && typeof f.inclusive === 'boolean' && (f.from === undefined || ver(f.from));
+      if (!(list && f.up_to === undefined && f.from === undefined && f.inclusive === undefined) && !(range && f.versions === undefined)) p.push('advisory.affected: either versions[] or up_to + inclusive (+ optional from), digits and dots');
+    }
     if (a.kev !== undefined && typeof a.kev !== 'boolean') p.push('advisory.kev');
   }
   if (!['original', 'win11debloat', 'loldrivers'].includes(x.source)) p.push('source');
@@ -136,11 +144,20 @@ export type Applies = 'applies' | 'not-applicable' | 'unknown';
 
 /** Whether an advisory covers the installed version. No version range, or no readable installed version: unknown. */
 export function advisoryApplies(a: Advisory, installed: string | undefined): Applies {
-  if (!a.affected) return 'unknown';
-  const v = installed?.match(/\d+(?:[.,]\d+)*/)?.[0];
+  const f = a.affected;
+  if (!f) return 'unknown';
+  const v = installed?.match(/\d+(?:[.,]\d+)+/)?.[0] ?? installed?.match(/\d+/)?.[0]; // "AnySign4PC 1.1.2.6" → 1.1.2.6
   if (!v) return 'unknown';
-  const c = compareVersions(v, a.affected.up_to);
-  return c < 0 || (c === 0 && a.affected.inclusive) ? 'applies' : 'not-applicable';
+  if (f.versions) return f.versions.some((x) => compareVersions(v, x) === 0) ? 'applies' : 'not-applicable';
+  if (f.from !== undefined && compareVersions(v, f.from) < 0) return 'not-applicable';
+  const c = compareVersions(v, f.up_to!);
+  return c < 0 || (c === 0 && f.inclusive) ? 'applies' : 'not-applicable';
+}
+
+/** The published version scope in words, e.g. "from 1.1.4.4 up to and including 1.1.4.6". */
+export function describeAffected(f: NonNullable<Advisory['affected']>): string {
+  if (f.versions) return `versions ${f.versions.join(', ')}`;
+  return `versions ${f.from !== undefined ? `from ${f.from} ` : ''}${f.inclusive ? 'up to and including' : 'before'} ${f.up_to}`;
 }
 
 // --- detection helpers ---
