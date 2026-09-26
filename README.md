@@ -154,7 +154,7 @@ Mole is excellent on macOS; if you are on a Mac, use it. Hydra-bane borrows its 
 | Host | How | Status |
 |---|---|---|
 | Claude Code | Plugin: skill, MCP server, approval hook | Tested |
-| Codex CLI | [`AGENTS.md`](AGENTS.md) + CLI with `--json` | Best effort <!-- VERIFY: change to Tested only if confirmed --> |
+| Codex CLI | [`AGENTS.md`](AGENTS.md) + CLI with `--json` | Tested (read-only scan, Codex CLI 0.154, 2026-09-26) |
 | Gemini CLI | [`AGENTS.md`](AGENTS.md) + CLI with `--json` | Best effort |
 | Cursor and other MCP hosts | MCP server: `npx -y hydra-bane mcp` | Best effort |
 | Plain terminal | `npx hydra-bane …` with a y/N prompt | Tested |

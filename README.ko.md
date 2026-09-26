@@ -154,7 +154,7 @@ Mole은 macOS에서 훌륭한 도구입니다. Mac을 쓴다면 Mole을 쓰세�
 | 호스트 | 방식 | 상태 |
 |---|---|---|
 | Claude Code | 플러그인: 스킬, MCP 서버, 승인 훅 | 테스트 완료 |
-| Codex CLI | [`AGENTS.md`](AGENTS.md) + `--json` CLI | 최선 지원 <!-- VERIFY: 실측 확인 시에만 테스트 완료로 변경 --> |
+| Codex CLI | [`AGENTS.md`](AGENTS.md) + `--json` CLI | 테스트 완료 (읽기 전용 스캔, Codex CLI 0.154, 2026-09-26) |
 | Gemini CLI | [`AGENTS.md`](AGENTS.md) + `--json` CLI | 최선 지원 |
 | Cursor 등 MCP 호스트 | MCP 서버: `npx -y hydra-bane mcp` | 최선 지원 |
 | 일반 터미널 | `npx hydra-bane …`, y/N 확인 | 테스트 완료 |
