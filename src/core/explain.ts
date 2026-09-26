@@ -1,8 +1,13 @@
 import type { Category, ScanItem } from './scan.ts';
+import { ADMIN_TEXT } from './admin-text.ts';
+import { CACHE_TEXT_V02 } from './caches-text.ts';
+import { ATLAS_TEXT } from '../atlas/atlas-text.ts';
 
 // PLAN.md §5.2 `explain <item-id>`: plain-language reasons an agent can relay to the user.
 
-const TEXT: Record<Category, { what: string; why: string; after: string }> = {
+export type ExplainText = { what: string; why: string; after: string };
+
+const BASE: Partial<Record<Category, ExplainText>> = {
   temp: { what: 'Files in your user Temp folder that nobody has modified for over 24 hours.', why: 'Programs write scratch files here and often forget to remove them.', after: 'They are moved to quarantine, not deleted. You can undo for 7 days.' },
   'npm-cache': { what: 'Packages npm downloaded before.', why: 'npm keeps every downloaded package; projects do not need the cache to run.', after: 'npm downloads packages again the next time a project needs them.' },
   'pnpm-store': { what: 'Packages in the pnpm store that no project references any more.', why: '`pnpm store prune` removes only unreferenced packages; projects in use keep theirs.', after: 'Nothing to reinstall for current projects. Old projects re-download on next install.' },
@@ -17,15 +22,17 @@ const TEXT: Record<Category, { what: string; why: string; after: string }> = {
   quarantine: { what: 'Items Hydra-bane quarantined more than 7 days ago.', why: 'Quarantined files still use disk space until they are purged.', after: 'PERMANENT. They are deleted and cannot be restored.' },
 };
 
+const TEXT: Partial<Record<Category, ExplainText>> = { ...BASE, ...CACHE_TEXT_V02, ...ADMIN_TEXT, ...ATLAS_TEXT };
+
 export function explain(item: ScanItem) {
-  const t = TEXT[item.category];
+  const t = TEXT[item.category] ?? { what: item.title, why: item.instructions ?? '', after: '' };
   return {
     id: item.id,
     title: item.title,
     what: t.what,
     why_safe: t.why,
     what_happens: t.after,
-    how: item.op === 'tool_cmd' && item.command ? `runs "${[item.command.file, ...item.command.args].join(' ')}"` : item.op === 'quarantine' ? 'moves to quarantine' : 'deletes the folder',
+    how: item.op === 'uninstall' && item.uninstall ? `runs the vendor uninstaller "${[item.uninstall.file, ...item.uninstall.args].join(' ')}"` : item.op === 'report_only' ? 'reports only; Hydra-bane changes nothing' : item.op === 'tool_cmd' && item.command ? `runs "${[item.command.file, ...item.command.args].join(' ')}"` : item.op === 'quarantine' ? 'moves to quarantine' : 'deletes the folder',
     reversible: item.reversible,
     bytes: item.bytes,
     targets: item.targets.slice(0, 20),

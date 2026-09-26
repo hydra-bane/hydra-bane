@@ -8,13 +8,30 @@ import { scanBrowsers, scanCrashDumps, scanShaders } from './apps.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
-export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'browser-cache' | 'shader-cache' | 'crash-dumps' | 'node_modules' | 'target' | 'quarantine';
+export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'browser-cache' | 'shader-cache' | 'crash-dumps' | 'node_modules' | 'target' | 'quarantine'
+  // v0.2 user-level caches (PLAN.md §3.1)
+  | 'yarn-cache' | 'bun-cache' | 'conda-pkgs' | 'poetry-cache' | 'go-cache' | 'nuget-cache' | 'gradle-cache' | 'maven-repo' | 'hf-models' | 'ollama-models'
+  // v0.2 admin items (PLAN.md §3.1, §6.7)
+  | 'system-temp' | 'windows-update' | 'delivery-optimization' | 'system-dumps' | 'wer-archive' | 'winsxs' | 'hibernation' | 'windows-old' | 'wsl-disk' | 'docker-disk'
+  // v0.2 Atlas (PLAN.md §7)
+  | 'atlas';
+
+/** Vendor uninstaller that passed the PLAN.md §7.3 checks at scan time; apply re-checks everything. */
+export interface UninstallSpec {
+  entryId: string;
+  kind: 'msi' | 'exe';
+  /** Absolute path of the executable to run (msiexec.exe for MSI). */
+  file: string;
+  args: string[];
+  /** Authenticode thumbprints the executable must be signed with (exe only). */
+  signers: string[];
+}
 
 export interface ScanItem {
   id: string;
   category: Category;
   title: string;
-  op: 'quarantine' | 'tool_cmd' | 'delete_cache' | 'purge_quarantine';
+  op: 'quarantine' | 'tool_cmd' | 'delete_cache' | 'purge_quarantine' | 'uninstall' | 'report_only';
   targets: string[];
   allowRoot: string;
   command?: { file: string; args: string[] };
@@ -24,8 +41,13 @@ export interface ScanItem {
   requiresClosed?: string[];
   bytes: number;
   files: number;
-  risk: 'safe' | 'caution';
-  reversible: 'move-back' | 'redownload' | 'none';
+  risk: 'safe' | 'caution' | 'danger';
+  reversible: 'move-back' | 'redownload' | 'reinstall-only' | 'none';
+  /** Must run elevated (PLAN.md §6.7). apply refuses it in a non-elevated process. */
+  needsAdmin?: boolean;
+  uninstall?: UninstallSpec;
+  /** Plain-language instructions for items Hydra-bane only reports (op 'report_only'). */
+  instructions?: string;
 }
 
 const DAY = 86_400_000;
