@@ -1,0 +1,20 @@
+{
+  "name": "hydra-bane",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Windows cleanup & hygiene CLI for AI coding agents. Nothing changes until you confirm; every change leaves an undoable receipt.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "os": ["win32"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "fast-check": "4.10.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}
