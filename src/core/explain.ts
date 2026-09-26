@@ -2,6 +2,7 @@ import type { Category, ScanItem } from './scan.ts';
 import { ADMIN_TEXT } from './admin-text.ts';
 import { CACHE_TEXT_V02 } from './caches-text.ts';
 import { ATLAS_TEXT } from '../atlas/atlas-text.ts';
+import { OPTIMIZE_TEXT } from './optimize.ts';
 
 // PLAN.md §5.2 `explain <item-id>`: plain-language reasons an agent can relay to the user.
 
@@ -22,7 +23,7 @@ const BASE: Partial<Record<Category, ExplainText>> = {
   quarantine: { what: 'Items Hydra-bane quarantined more than 7 days ago.', why: 'Quarantined files still use disk space until they are purged.', after: 'PERMANENT. They are deleted and cannot be restored.' },
 };
 
-const TEXT: Partial<Record<Category, ExplainText>> = { ...BASE, ...CACHE_TEXT_V02, ...ADMIN_TEXT, ...ATLAS_TEXT };
+const TEXT: Partial<Record<Category, ExplainText>> = { ...BASE, ...CACHE_TEXT_V02, ...ADMIN_TEXT, ...ATLAS_TEXT, ...OPTIMIZE_TEXT };
 
 export function explain(item: ScanItem) {
   const t = TEXT[item.category] ?? { what: item.title, why: item.instructions ?? '', after: '' };

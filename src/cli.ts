@@ -7,13 +7,16 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { apply, readPrefs, recover, starAsked, undo, writePrefs } from './core/apply.ts';
 import { atlasStatus, loadInstalledBundle, updateBundle } from './atlas/bundle.ts';
+import { scanOptimize } from './core/optimize.ts';
+import { collectStatus, formatStatus, watchStatus } from './core/status.ts';
 import { isElevated } from './core/admin.ts';
 import { elevatedApplyCommand, installHelper, launchElevated, parseAdminApplyArgs, readAdminResult, runAdminApply } from './admin/helper.ts';
 import { buildProtectedPaths } from './guard/protected.ts';
 import { listPrograms } from './atlas/programs.ts';
 import { authenticode, buildReport, countryCode, mainExecutable, submit } from './atlas/report.ts';
 import { appItem, commandLine } from './atlas/uninstall.ts';
-import { keyMatches, signerMatches } from './atlas/entry.ts';import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
+import { keyMatches, signerMatches } from './atlas/entry.ts';
+import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
 import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
 import { explain } from './core/explain.ts';
@@ -136,7 +139,9 @@ export async function main(argv: string[]): Promise<Exit> {
 
     case 'plan': {
       const ctx = context(a);
-      const items = scan(ctx, a.only).filter((i) => (a.allSafe ? i.risk === 'safe' : a.select?.includes(i.id)));
+      // Maintenance actions are not part of a normal scan; they are planned only when selected by their OPT- id.
+      const pool = [...scan(ctx, a.only), ...(a.select?.some((s) => s.startsWith('OPT-')) ? scanOptimize(ctx) : [])];
+      const items = pool.filter((i) => (a.allSafe ? i.risk === 'safe' && i.category !== 'optimize' : a.select?.includes(i.id)));
       if (!items.length) { emit(a, 'plan', false, null, 'Nothing selected. Use --select <ids> or --all-safe.', { error: { code: 'EMPTY', message: 'nothing selected' } }); return 1; }
       const plan = makePlan(ctx, items);
       emit(a, 'plan', true, { plan_id: plan.id, hash: plan.hash, items: plan.items.map((i) => i.id), expires_at: plan.expiresAt },
@@ -162,7 +167,7 @@ ${summary}`,
       }
       const failed = r.outcomes.filter((o) => !o.ok);
       emit(a, 'apply', true, r,
-        [`Receipt ${r.tx}: freed ${gb(r.freedNowBytes)} now, quarantined ${gb(r.quarantinedBytes)} (undo: hydra-bane undo ${r.tx}).`,
+        [`Receipt ${r.tx}: freed ${gb(r.freedNowBytes)} now, quarantined ${gb(r.quarantinedBytes)}${r.quarantinedBytes > 0 || r.outcomes.some((o) => o.ok && o.id.startsWith('LEFT-')) ?` (undo: hydra-bane undo ${r.tx})` : ''}.`,
           ...failed.map((f) => `  skipped ${f.id} ${f.target}: ${f.code}`)].join('\n'),
         r.firstSuccess ? { hints: { star_prompt: true, freed_bytes: r.freedNowBytes + r.quarantinedBytes } } : {});
       if (r.firstSuccess && !a.json) await askStar(ctx, r.freedNowBytes + r.quarantinedBytes);
@@ -184,7 +189,7 @@ ${summary}`,
 
     case 'explain': {
       const ctx = context(a);
-      const item = scan(ctx, a.only).find((i) => i.id === a.pos[0]);
+      const item = (a.pos[0]?.startsWith('OPT-') ? scanOptimize(ctx) : scan(ctx, a.only)).find((i) => i.id === a.pos[0]);
       if (!item) { emit(a, 'explain', false, null, `No item ${a.pos[0] ?? ''} in the current scan.`, { error: { code: 'NOT_FOUND', message: 'run scan to see current ids' } }); return 1; }
       const e = explain(item);
       emit(a, 'explain', true, e, [`${e.id}: ${e.title}`, `What: ${e.what}`, `Why it is safe: ${e.why_safe}`, `What happens: ${e.what_happens}`, `How: ${e.how}`, `Size: ${(e.bytes / 2 ** 30).toFixed(2)} GB`, ...e.targets.map((t) => `  ${t}`)].join('\n'));
@@ -273,6 +278,26 @@ ${summary}`,
       remember(sent.via === 'gh' ? 'submitted' : 'link', sent.url);
       emit(a, 'report', true, { id, via: sent.via, url: sent.url },
         sent.via === 'gh' ? `Reported: ${sent.url}\nThanks! Maintainers review it before it reaches anyone's PC.` : `Open this link to post the report (a GitHub account is needed):\n${sent.url}`);
+      return 0;
+    }
+
+    case 'optimize': {
+      const ctx = context(a);
+      const items = scanOptimize(ctx);
+      emit(a, 'optimize', true, { items }, ['Maintenance actions (nothing was changed):', ...items.map((i) => `  ${i.id.padEnd(18)} ${i.op === 'report_only' ? '[report only] ' : ''}${i.risk === 'danger' ? '[danger] ' : ''}${i.title}`), '', 'Run one with: hydra-bane plan --select OPT-DNS, then apply after approval. Details: hydra-bane explain <id>'].join('\n'));
+      return 0;
+    }
+
+    case 'status': {
+      if (argv.includes('--watch')) {
+        const ac = new AbortController();
+        process.once('SIGINT', () => ac.abort());
+        const clear = '\x1b[2J\x1b[H';
+        await watchStatus(2000, (s) => { process.stdout.write(a.json ? JSON.stringify(s) + '\n' : clear + formatStatus(s).join('\n') + '\n'); }, ac.signal, undefined, () => {});
+        return 0;
+      }
+      const s = await collectStatus();
+      emit(a, 'status', true, s, formatStatus(s).join('\n'));
       return 0;
     }
 
@@ -366,7 +391,10 @@ ${summary}`,
 
     default:
       process.stdout.write(['hydra-bane — safe Windows cleanup for humans and AI agents', '',
-        '  scan   [--only temp,npm-cache,pnpm-store,pip-cache,uv-cache,cargo-registry,browser-cache,shader-cache,crash-dumps,node_modules,target,quarantine] [--root <dir>]...',
+        '  scan   [--only <categories>] [--root <dir>]...   categories: temp, npm-cache, pnpm-store, pip-cache, uv-cache, yarn-cache,',
+        '                          bun-cache, conda-pkgs, poetry-cache, go-cache, nuget-cache, gradle-cache, maven-repo, hf-models, ollama-models,',
+        '                          cargo-registry, browser-cache, shader-cache, crash-dumps, node_modules, target, quarantine, installers, orphans,',
+        '                          leftovers, atlas, and admin items (system-temp, windows-update, delivery-optimization, winsxs, hibernation…)',
         '                          find reclaimable space (read-only)',
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
@@ -384,6 +412,8 @@ ${summary}`,
         '  admin-install [--yes]      install the admin-only helper into C:\\ProgramData (UAC, verified against npm)',
         '  recover                    finish the ledger of an interrupted apply or undo',
         '  mcp                        run the read-only MCP server on stdio',
+        '  status [--watch]           CPU, memory, disks, GPU, network, battery and a health score (read-only)',
+        '  optimize                   list maintenance actions (DNS flush, icon refresh, startup apps review…)',
         '  version', '', 'Add --json for machine-readable output.'].join('\n') + '\n');
       return a.cmd === 'help' ? 0 : 1;
   }

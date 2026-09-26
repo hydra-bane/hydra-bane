@@ -10,6 +10,8 @@ import { scanAtlas, type AtlasItemData } from '../atlas/match.ts';
 import { loadInstalledBundle } from '../atlas/bundle.ts';
 import { scanCachesV02 } from './caches-v02.ts';
 import { scanLeftovers } from './leftovers.ts';
+import { scanInstallers } from './downloads.ts';
+import { scanOrphans } from './orphans.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
@@ -270,6 +272,8 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
     ...(ADMIN_CATEGORIES.some(want) ? scanAdmin({}, only) : []),
     ...(want('atlas') ? scanAtlas({ bundle: loadInstalledBundle(ctx.stateDir), cacheDir: ctx.stateDir }) : []),
     ...(want('leftovers') ? scanLeftovers(ctx) : []),
+    ...(want('installers') ? scanInstallers(ctx) : []),
+    ...(want('orphans') ? scanOrphans(ctx) : []),
   ];
   for (const i of items) if (!i.id) i.id = stableId(i);
   return items;

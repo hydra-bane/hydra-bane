@@ -28,8 +28,8 @@ export interface LeftoverDeps {
 
 /** More document-like files than this and the folder is only reported. */
 export const DOC_LIMIT = 2;
-const DOC_EXT = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.hwp', '.hwpx', '.pdf', '.odt', '.ods', '.odp', '.rtf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.heic', '.webp', '.raw', '.cr2', '.nef', '.psd', '.ai', '.indd', '.dwg', '.mp3', '.wav', '.flac', '.mp4', '.mov', '.avi', '.mkv']);
-const WALK_LIMIT = 50_000;
+export const DOC_EXT = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.hwp', '.hwpx', '.pdf', '.odt', '.ods', '.odp', '.rtf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.heic', '.webp', '.raw', '.cr2', '.nef', '.psd', '.ai', '.indd', '.dwg', '.mp3', '.wav', '.flac', '.mp4', '.mov', '.avi', '.mkv']);
+export const WALK_LIMIT = 50_000;
 
 /** Folder/key names that are never one program's own. */
 const GENERIC = new Set(['microsoft', 'windows', 'google', 'mozilla', 'apple', 'adobe', 'intel', 'nvidia', 'amd', 'common files', 'programs', 'packages', 'temp', 'tmp', 'cache', 'caches', 'data', 'config', 'logs', 'local', 'roaming', 'locallow', 'users', 'public', 'default', 'system', 'system32', 'app', 'apps', 'application', 'applications', 'program files', 'programdata', 'software', 'tools', 'bin', 'hydra-bane', 'package cache', 'installer', 'setup', 'update', 'updater', 'crashdumps', 'desktop', 'documents', 'downloads', 'onedrive', ...RESERVED_KEY_SEGMENTS]);
@@ -102,7 +102,7 @@ function inspect(dir: string): { git: boolean; docs: number; truncated: boolean 
   return { git: false, docs, truncated: false };
 }
 
-function defaultShortcutTargets(files: string[]): Map<string, string> {
+export function defaultShortcutTargets(files: string[]): Map<string, string> {
   const out = new Map<string, string>();
   if (!files.length) return out;
   const list = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hb-lnk-')), 'list.json');
@@ -120,7 +120,7 @@ function defaultShortcutTargets(files: string[]): Map<string, string> {
   return out;
 }
 
-function lnkFiles(dir: string, depth = 0): string[] {
+export function lnkFiles(dir: string, depth = 0): string[] {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
   return entries.flatMap((e) => {

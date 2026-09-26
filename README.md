@@ -194,6 +194,9 @@ Every command accepts `--json` and returns `{schema_version, command, ok, data, 
 | `admin-install` | Install the admin-only helper, verified against npm (UAC prompt) | Yes |
 | `recover` | Finish the receipts of an interrupted apply or undo | Receipts only |
 | `mcp` | Run the read-only MCP server on stdio | No |
+| `status [--watch]` | CPU, memory, disks, GPU, network, battery, top processes and a health score with its reasons | No |
+| `optimize` | List maintenance actions: DNS flush and icon refresh run through a plan; Store/thumbnail/search/Recycle Bin/startup are explained, not run | Only the two run through `apply` |
+| `scan --only installers,orphans` | Old installers in Downloads, app folders nothing references, dead Start Menu shortcuts | No (apply quarantines, undoable) |
 
 ## Roadmap
 

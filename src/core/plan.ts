@@ -65,7 +65,7 @@ export function summarize(plan: Plan): string {
   const lines = [
     `Hydra-bane plan ${plan.hash.slice(0, 8)}`,
     `Reclaim now: ${gb(now)} (caches and expired quarantine) | Moved to quarantine: ${gb(later)} (undoable for 7 days)${uninstalls.length ? ` | Uninstalls: ${uninstalls.length} program(s), cannot be undone` : ''}`,
-    ...plan.items.slice(0, 10).map((i) => `${i.risk === 'caution' ? '[caution] ' : ''}${i.reversible === 'none' ? '[PERMANENT] ' : ''}${i.id} ${i.title} - ${gb(i.bytes)}`),
+    ...plan.items.slice(0, 10).map((i) => `${i.risk === 'caution' ? '[caution] ' : ''}${i.reversible === 'none' && i.category !== 'optimize' ? '[PERMANENT] ' : ''}${i.id} ${i.title} - ${gb(i.bytes)}`),
     ...(plan.items.length > 10 ? [`... and ${plan.items.length - 10} more`] : []),
   ];
   return lines.join('\n');

@@ -62,7 +62,7 @@ describe.runIf(process.platform === 'win32')('mcp server over stdio', () => {
   it('lists exactly the allowed tools, none destructive', async () => {
     const r = await request('tools/list');
     const names = r.result.tools.map((t: any) => t.name);
-    expect(names.sort()).toEqual(['analyze', 'explain', 'ledger_verify', 'plan', 'plan_summary', 'programs', 'report_preview', 'scan']);
+    expect(names.sort()).toEqual(['analyze', 'explain', 'ledger_verify', 'plan', 'plan_summary', 'programs', 'report_preview', 'scan', 'status']);
     for (const n of names) expect(n).not.toMatch(/apply|undo|purge|submit|star/);
     for (const t of r.result.tools) expect(t.description).toContain('hydra-bane apply <plan-id>');
   });
@@ -85,6 +85,14 @@ describe.runIf(process.platform === 'win32')('mcp server over stdio', () => {
     expect(fs.existsSync(path.join(temp, 'old.tmp'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'state', 'hydra-bane', 'ledger'))).toBe(false);
   });
+
+  it('status returns a live read-only snapshot', async () => {
+    const r = await call('status');
+    expect(r.result.isError).toBe(false);
+    const d = r.result.structuredContent.data;
+    expect(d.memory.totalBytes).toBeGreaterThan(0);
+    expect(d.health.score).toBeGreaterThanOrEqual(0);
+  }, 20_000);
 
   it('rejects unknown tools and flag smuggling', async () => {
     for (const name of ['apply', 'undo', 'purge', 'nope']) {

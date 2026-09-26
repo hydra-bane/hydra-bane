@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Readable, Writable } from 'node:stream';
 import type { Context } from '../core/context.ts';
 import { loadPlan, summarize } from '../core/plan.ts';
+import { collectStatus } from '../core/status.ts';
 import { currentUserSid } from '../quarantine/quarantine.ts';
 
 // MCP over stdio (newline-delimited JSON-RPC 2.0), hand-written: no runtime dependencies (PLAN.md §5).
@@ -55,6 +56,9 @@ export const TOOLS = [
   { name: 'plan_summary', title: 'Summarize a sealed plan', annotations: ro,
     description: `Show what applying a sealed plan would do (read-only), to show the human before asking for approval. ${APPROVAL}`,
     inputSchema: { type: 'object', properties: { plan_id: str }, required: ['plan_id'], additionalProperties: false } },
+  { name: 'status', title: 'System status', annotations: ro,
+    description: `One snapshot of CPU, GPU, memory, disks, disk I/O, network, battery, uptime, pending reboot, top processes and a 0-100 health score with the reason for each deduction (read-only, ~2.5 s). ${APPROVAL}`,
+    inputSchema: { type: 'object', additionalProperties: false } },
   { name: 'ledger_verify', title: 'Verify receipts ledger', annotations: ro,
     description: `Verify the receipts ledger hash chain and show recent receipts (read-only). ${APPROVAL}`,
     inputSchema: { type: 'object', additionalProperties: false } },
@@ -115,6 +119,7 @@ async function runTool(name: string, a: Json): Promise<Json> {
     }
     case 'plan_summary': return planSummary(val(a.plan_id, 'plan_id', /^[a-z0-9]{1,64}$/));
     case 'ledger_verify': return cli(['ledger']);
+    case 'status': return { command: 'status', ok: true, data: await collectStatus() };
   }
   throw new Error('unreachable');
 }

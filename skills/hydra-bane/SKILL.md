@@ -58,6 +58,20 @@ hibernation unless the user wants the space: it also disables Fast Startup.
 If apply or undo was interrupted, `hydra-bane recover --json` finishes the receipt from what is actually on disk.
 apply and undo also run it automatically.
 
+## PC status and maintenance
+
+- "How is my PC doing?": `hydra-bane status --json` (read-only: CPU, memory, disks, GPU, network, battery, top
+  processes, health score with the reason for every deduction). Relay the reasons, not just the number.
+- Maintenance: `hydra-bane optimize --json` lists actions. Only `OPT-DNS` and `OPT-ICON-CACHE` run; they go through
+  the same plan → ask → apply loop (`plan --select OPT-DNS`). The others are report-only: give the user `instructions`
+  (the Startup review lists what starts with Windows; never disable entries yourself).
+
+## Old installers and abandoned app folders
+
+`scan --only installers,orphans --json`: installer files in Downloads unchanged for 30+ days (`INST-…`), app folders
+in `%LOCALAPPDATA%\Programs` that nothing references any more (`ORPHAN-…`) and Start Menu shortcuts whose target is
+gone (`DEAD-SHORTCUTS`). All are quarantined (undoable). Ask before each; an installer may be the only copy the user has.
+
 ## Exploring space
 
 `hydra-bane analyze <dir> --json` lists the largest children of a folder (read-only). Use it to answer
