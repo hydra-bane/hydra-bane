@@ -209,7 +209,7 @@ ${summary}`,
 
     default:
       process.stdout.write(['hydra-bane — safe Windows cleanup for humans and AI agents', '',
-        '  scan   [--only temp,npm-cache,pnpm-store,pip-cache,uv-cache,cargo-registry,node_modules,target] [--root <dir>]...',
+        '  scan   [--only temp,npm-cache,pnpm-store,pip-cache,uv-cache,cargo-registry,browser-cache,shader-cache,crash-dumps,node_modules,target,quarantine] [--root <dir>]...',
         '                          find reclaimable space (read-only)',
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
