@@ -6,7 +6,7 @@ import type { Context } from './context.ts';
 import { Ledger } from '../ledger/ledger.ts';
 import { scanBrowsers, scanCrashDumps, scanShaders } from './apps.ts';
 import { ADMIN_CATEGORIES, scanAdmin } from './admin.ts';
-import { scanAtlas } from '../atlas/match.ts';
+import { scanAtlas, type AtlasItemData } from '../atlas/match.ts';
 import { loadInstalledBundle } from '../atlas/bundle.ts';
 import { scanCachesV02 } from './caches-v02.ts';
 
@@ -54,6 +54,8 @@ export interface ScanItem {
   uninstall?: UninstallSpec;
   /** Plain-language instructions for items Hydra-bane only reports (op 'report_only'). */
   instructions?: string;
+  /** Atlas items: facts measured on this PC and quoted third-party advisories, as data for agents. */
+  atlas?: AtlasItemData;
 }
 
 const DAY = 86_400_000;

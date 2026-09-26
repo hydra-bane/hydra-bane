@@ -23,7 +23,8 @@ export function verifyBundle(bytes: Buffer, sigBase64: string, publicKeyPem = AT
   if (!good) return { ok: false, error: 'bad signature' };
   let b: any;
   try { b = JSON.parse(bytes.toString('utf8')); } catch { return { ok: false, error: 'bundle is not JSON' }; }
-  if (b?.schema !== 1 || !Number.isSafeInteger(b.bundle_seq) || b.bundle_seq < 1 || typeof b.created !== 'string' || !Array.isArray(b.entries)) return { ok: false, error: 'bundle header is invalid' };
+  if (b?.schema !== 2) return { ok: false, error: `bundle schema ${String(b?.schema)} is not supported (this Hydra-bane reads schema 2)` };
+  if (!Number.isSafeInteger(b.bundle_seq) || b.bundle_seq < 1 || typeof b.created !== 'string' || !Array.isArray(b.entries)) return { ok: false, error: 'bundle header is invalid' };
   return { ok: true, bundle: b as AtlasBundle };
 }
 

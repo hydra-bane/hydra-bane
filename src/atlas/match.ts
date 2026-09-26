@@ -3,13 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ScanItem } from '../core/scan.ts';
-import { atlasItemId, keyMatches, signerMatches, type AtlasBundle, type AtlasEntry } from './entry.ts';
+import { advisoryApplies, atlasItemId, keyMatches, signerMatches, type Advisory, type Applies, type AtlasBundle, type AtlasEntry } from './entry.ts';
+import { measureFacts, type FactsRunner, type ProgramFacts } from './facts.ts';
 import { listPrograms as defaultListPrograms, UNINSTALL_ROOTS, type Program } from './programs.ts';
 import { mainExecutable, type Signer } from './report.ts';
 import { buildUninstall, type UninstallDeps } from './uninstall.ts';
 
-// Atlas T1 matching (PLAN.md §7): installed programs against the signed bundle. Output is neutral wording only:
-// "software you can remove yourself" plus Microsoft PUA terms, never a verdict.
+// Atlas matching (PLAN.md §7, schema 2): installed programs against the signed bundle. Items state facts only:
+// what the entry says the program is, what it does on this PC (facts.ts), and advisories that cover this version.
 
 export type SignersOf = (files: string[]) => Map<string, Signer | undefined>;
 
@@ -38,6 +39,8 @@ export interface AtlasScanDeps extends UninstallDeps {
   signersOf?: SignersOf;
   /** Folder for the signature cache (the state dir). Detection only: apply re-checks signatures live. */
   cacheDir?: string;
+  /** Read-only measurement of this PC; runs once, and only when a program matched. */
+  factsRunner?: FactsRunner;
 }
 
 /** Caches lookups by path + size + mtime. A replaced file changes size or mtime and is looked up again. */
@@ -57,29 +60,70 @@ export function cachedSigners(dir: string, inner: SignersOf): SignersOf {
   };
 }
 
-const LABEL: Record<AtlasEntry['category'][number], string> = {
-  advertising: 'advertising', torrent: 'torrent', cryptomining: 'cryptomining', bundling: 'bundling', marketing: 'marketing',
-  evasion: 'evasion', 'poor-industry-reputation': 'poor industry reputation', 'vulnerable-software': 'known vulnerable software', 'vulnerable-driver': 'known vulnerable driver',
-};
-const RECOMMEND: Record<AtlasEntry['removal_recommendation'], string> = { recommended: 'removal recommended', optional: 'removal optional', 'not-recommended': 'removal not recommended' };
-
 const keyPath = (p: Program) => `${UNINSTALL_ROOTS.find((r) => r.hive === p.hive && r.view === p.view)?.key ?? p.hive}\\${p.keyName}`;
+const size = (b: number) => (b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 2 ** 20))} MB`);
 
-export function atlasItem(p: Program, e: AtlasEntry, deps: UninstallDeps = {}): ScanItem {
+/** Structured Atlas data on a scan item, for agents. */
+export interface AtlasItemData {
+  entryId: string;
+  context: string;
+  facts: ProgramFacts;
+  advisories: (Advisory & { applies: Applies })[];
+}
+
+const emptyFacts = (p: Program): ProgramFacts => ({ version: p.version, installDate: undefined, bytes: p.estimatedBytes, dirs: [], rootCerts: [], listeners: [], services: [] });
+
+function advisoryLine(a: Advisory & { applies: Applies }, version: string | undefined): string {
+  const head = `${who(a)} ${a.date}: "${a.title}"${a.cve?.length ? ` (${a.cve.join(', ')})` : ''}${a.kev ? ' [in CISA Known Exploited Vulnerabilities]' : ''} ${a.url}`;
+  const range = a.affected && `${a.affected.inclusive ? 'up to and including' : 'before'} ${a.affected.up_to}`;
+  if (a.applies === 'applies') return `${head}. Covers your version ${version} (the advisory covers versions ${range}).`;
+  if (a.applies === 'not-applicable') return `${head}. Does not cover your version ${version}: your version is newer than the ${a.affected!.inclusive ? 'last affected' : 'fixed'} version ${a.affected!.up_to}.`;
+  return `${head}. ${a.affected ? `Your installed version could not be read; the advisory covers versions ${range}.` : 'The advisory names no version range.'}`;
+}
+
+const who = (a: Advisory) => (a.publisher === 'other' ? 'third-party' : a.publisher);
+const shortCert = (s: string) => /CN=([^,]+)/.exec(s)?.[1] ?? /O=([^,]+)/.exec(s)?.[1] ?? s;
+
+/** One-line title of measured facts; the full detail goes to instructions (people) and `atlas` (agents). */
+export function atlasItem(p: Program, e: AtlasEntry, deps: UninstallDeps = {}, facts: ProgramFacts = emptyFacts(p)): ScanItem {
   const spec = buildUninstall(p, e, deps);
-  const listed = e.category.length ? `; listed as ${e.category.map((c) => LABEL[c]).join(', ')}` : '';
-  const title = `${e.names[0]} by ${e.vendor.name}${p.name !== e.names[0] ? ` (installed as "${p.name}")` : ''}: user-removable software${listed}; ${RECOMMEND[e.removal_recommendation]}${e.dispute.status === 'open' ? '; vendor dispute open' : ''}`;
+  const advisories = e.advisories.map((a) => ({ ...a, applies: advisoryApplies(a, p.version) }));
+  const applying = advisories.filter((a) => a.applies === 'applies');
+  const ports = (net: boolean) => facts.listeners.filter((l) => l.network === net).map((l) => l.port);
+  const plural = (n: number[]) => `port${n.length > 1 ? 's' : ''} ${n.join(', ')}`;
+  const network = ports(true), local = ports(false), auto = facts.services.filter((s) => s.startsWithWindows);
+  const parts = [
+    network.length && `accepts network connections on ${plural(network)}`,
+    local.length && `runs a local server on ${plural(local)}`,
+    facts.rootCerts.length && `installed trusted root certificate ${facts.rootCerts.map((c) => `"${shortCert(c.subject)}"`).join(', ')}`,
+    auto.length && `starts with Windows (service ${auto.map((s) => s.name).join(', ')})`,
+    applying.length && `${who(applying[0]!)} advisory ${applying[0]!.date} covers your version${applying.length > 1 ? ` (+${applying.length - 1} more)` : ''}`,
+  ].filter((x): x is string => !!x);
+  if (!parts.length) parts.push(`installed${facts.installDate ? ` ${facts.installDate}` : ''}${facts.bytes ? `, ${size(facts.bytes)}` : ''}`);
+  const title = `${e.names[0]} by ${e.vendor.name}${p.name !== e.names[0] ? ` (installed as "${p.name}")` : ''}: ${parts.join('; ')}${e.dispute.status === 'open' ? '; vendor dispute open' : ''}`;
+
+  const details = [
+    `What it is: ${e.context} (source: ${e.sources[0]!.url})`,
+    `Installed: version ${p.version ?? 'unknown'}${facts.installDate ? `, on ${facts.installDate}` : ''}${facts.bytes ? `, ${size(facts.bytes)}` : ''}${facts.dirs.length ? `, in ${facts.dirs.join('; ')}` : ''}.`,
+    ...facts.rootCerts.map((c) => `Trusted root certificate "${c.subject}" (thumbprint ${c.thumbprint}, valid from ${c.notBefore}) is in the ${c.stores.join(' and ')} root store${c.stores.length > 1 ? 's' : ''}. Windows trusts sites and code this certificate vouches for.`),
+    ...facts.listeners.map((l) => `Listens on TCP port ${l.port} (${l.address}, ${l.network ? 'other machines can connect unless a firewall blocks them' : 'this PC only'}): ${l.process}`),
+    ...facts.services.map((s) => `Service "${s.name}": start mode ${s.startMode}${s.startsWithWindows ? ' (starts with Windows)' : ''}, ${s.state.toLowerCase()}: ${s.exe}`),
+    ...(advisories.length ? advisories.map((a) => `Advisory: ${advisoryLine(a, p.version)}`) : ['Advisories: none recorded in the Atlas for this program.']),
+    e.reinstall_note && `If you need it again: ${e.reinstall_note}`,
+    e.dispute.status !== 'none' && `Vendor dispute (${e.dispute.status})${e.dispute.url ? `: ${e.dispute.url}` : ''}.`,
+    ...e.vendor_response.map((r) => `Vendor response (${r.date}): ${r.url}`),
+  ].filter((x): x is string => !!x);
   const target = p.installLocation && /^[a-z]:\\/i.test(p.installLocation) ? p.installLocation : keyPath(p);
-  const notes = [e.reinstall_note && `If you need it again: ${e.reinstall_note}`, e.dispute.url && `Vendor dispute: ${e.dispute.url}`, ...e.vendor_response.map((r) => `Vendor response (${r.date}): ${r.url}`)].filter(Boolean).join(' ');
   const base = {
     id: atlasItemId(e.id, p.id), category: 'atlas' as const, title, targets: [target], allowRoot: target,
-    bytes: p.estimatedBytes ?? 0, files: 0, risk: e.removal_recommendation === 'not-recommended' ? 'danger' as const : 'caution' as const, reversible: 'reinstall-only' as const,
+    bytes: p.estimatedBytes ?? 0, files: 0, risk: 'caution' as const, reversible: 'reinstall-only' as const,
+    atlas: { entryId: e.id, context: e.context, facts, advisories },
   };
   if ('reason' in spec) {
-    return { ...base, op: 'report_only', instructions: `Remove it from Settings > Apps > Installed apps (look for "${p.name}"). Hydra-bane will not run its uninstaller: ${spec.reason}.${notes ? ` ${notes}` : ''}` };
+    return { ...base, op: 'report_only', instructions: [`Remove it from Settings > Apps > Installed apps (look for "${p.name}"). Hydra-bane will not run its uninstaller: ${spec.reason}.`, ...details].join('\n') };
   }
   // ponytail: per-machine EXE uninstallers usually demand elevation, and CreateProcess cannot raise UAC; MSI elevates itself.
-  return { ...base, op: 'uninstall', uninstall: spec, ...(p.hive === 'HKLM' && spec.kind === 'exe' ? { needsAdmin: true } : {}), ...(notes ? { instructions: notes } : {}) };
+  return { ...base, op: 'uninstall', uninstall: spec, ...(p.hive === 'HKLM' && spec.kind === 'exe' ? { needsAdmin: true } : {}), instructions: details.join('\n') };
 }
 
 /** First matching entry per installed program. Nothing is selected here; atlas items are never risk 'safe'. */
@@ -95,12 +139,13 @@ export function scanAtlas(deps: AtlasScanDeps): ScanItem[] {
   const files = needSigners ? [...new Set(programs.filter((p) => !bundle.entries.some((x) => keyMatches(x, p))).map((p) => exes.get(p.id)).filter((f): f is string => !!f))] : [];
   const lookup = deps.signersOf ?? (deps.cacheDir ? cachedSigners(deps.cacheDir, authenticodeMany) : authenticodeMany);
   const signers = files.length ? lookup(files) : new Map<string, Signer | undefined>();
-  const items: ScanItem[] = [];
+  const matched: Program[] = [], entries: AtlasEntry[] = [];
   for (const p of programs) {
     const exe = exes.get(p.id);
     const signer = exe ? signers.get(exe) : undefined;
     const e = bundle.entries.find((x) => keyMatches(x, p) || signerMatches(x, signer));
-    if (e) items.push(atlasItem(p, e, deps));
+    if (e) { matched.push(p); entries.push(e); }
   }
-  return items;
+  const facts = measureFacts(matched, entries, deps.factsRunner, env);
+  return matched.map((p, i) => atlasItem(p, entries[i]!, deps, facts[i]));
 }

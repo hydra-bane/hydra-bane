@@ -94,7 +94,15 @@ Sizes count each hard-linked file once, so pnpm stores and similar caches are no
 
 ## The Atlas: unwanted programs by country
 
-The [Atlas](https://github.com/hydra-bane/atlas) is a community-maintained, per-country catalog of bundled and hard-to-remove software (data under CC BY-SA 4.0). It starts with seven entries from Korea and the US, each backed by public sources such as KISA advisories, the FTC and security research. `hydra-bane atlas update` downloads the signed catalog; after that, `scan` flags installed programs that match an entry.
+The [Atlas](https://github.com/hydra-bane/atlas) is a community-maintained, per-country catalog of bundled and hard-to-remove software (data under CC BY-SA 4.0). It starts with seven entries from Korea and the US, each backed by public sources such as KISA advisories, the FTC and security research. `hydra-bane atlas update` downloads the signed catalog; after that, `scan` lists installed programs that match an entry.
+
+The Atlas states facts, not verdicts. For each match you see:
+
+- **What it is**, in one neutral sentence with its source.
+- **What it does on your PC, measured during the scan** (read-only): trusted root certificates it installed, ports it listens on and whether other machines can connect, and services that start with Windows.
+- **Third-party advisories (KISA, NVD, CISA…) quoted with date and link**, and marked as covering your version only when their version range includes it. Advisories for older versions say that your version is newer.
+
+Hydra-bane does not judge the program. You decide whether to keep it.
 
 - **Removal runs the vendor's own uninstaller, never a command line from the registry as-is.** The uninstaller must be the file the entry names, signed by a certificate the entry pins, and its arguments must stay inside the program's folder. Anything else is refused.
 - **When the uninstaller cannot be verified, Hydra-bane only reports** what it found and points you to Settings > Apps.

@@ -18,17 +18,17 @@ const TP = 'A'.repeat(40), OTHER_TP = 'B'.repeat(40);
 const GUID = '{11111111-2222-3333-4444-555555555555}';
 
 const entry = (over: Partial<AtlasEntry> = {}): AtlasEntry => ({
-  schema: 1, id: 'kr.example.clipdown', names: ['CLIPDOWN'], vendor: { name: 'Example Ads Co.', country: 'KR' },
-  category: ['bundling'], criteria_refs: [], tags: { countries: ['KR'], flags: [] }, removal_recommendation: 'recommended',
-  detect: { signers: [{ subject: 'CN=Example Ads Co.*', thumbprints: [TP] }], uninstall_keys: [{ display_name: '^CLIPDOWN', publisher: 'Example Ads Co.' }] },
+  schema: 2, id: 'kr.example.clipdown', names: ['CLIPDOWN'], vendor: { name: 'Example Ads Co.', country: 'KR' },
+  context: 'A download helper that some Korean video sites install alongside their player.', tags: { countries: ['KR'] },
+  detect: { signers: [{ subject: 'CN=Example Ads Co.*', thumbprints: [TP] }], uninstall_keys: [{ display_name: '^CLIPDOWN', publisher: 'Example Ads Co.' }], root_certs: [] },
   uninstall: { command_source: 'signed-exe', msi_product_codes: [], exe_name: 'uninst.exe' },
   residue: 'report-only', reversible: 'reinstall-only', reinstall_note: 'Nothing needs it.',
-  evidence: [{ url: 'https://example.org/research', kind: 'security-research', date: '2026-01-01' }],
+  sources: [{ url: 'https://example.org/research', kind: 'security-research', date: '2026-01-01' }], advisories: [],
   source: 'original', vendor_response: [], dispute: { status: 'none' }, verified: false, verified_by: null, added: '2026-09-25', last_reviewed: '2026-09-25',
   ...over,
 });
 
-const bundleBytes = (seq: number, entries: unknown[]) => Buffer.from(JSON.stringify({ schema: 1, bundle_seq: seq, created: '2026-09-26', entries }));
+const bundleBytes = (seq: number, entries: unknown[]) => Buffer.from(JSON.stringify({ schema: 2, bundle_seq: seq, created: '2026-09-26', entries }));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hb-atlas-'));
 
 const UNINST = 'C:\\Program Files\\Clipdown\\uninst.exe';
@@ -37,10 +37,16 @@ const prog = (over: Partial<Program> = {}): Program => ({
   installLocation: 'C:\\Program Files\\Clipdown', uninstallString: `"${UNINST}"`, estimatedBytes: 1024, ...over,
 });
 const valid: Signer = { status: 'Valid', subject: 'CN=Example Ads Co., O=Example', thumbprint: TP };
-const deps = (signer: Signer | undefined = valid) => ({ exists: () => true, signerOf: () => signer, env: { SystemRoot: 'C:\\Windows' } });
+const noFacts = () => ({ certs: [], listeners: [], services: [] });
+const deps = (signer: Signer | undefined = valid) => ({ exists: () => true, signerOf: () => signer, env: { SystemRoot: 'C:\\Windows' }, factsRunner: noFacts });
 
 describe('bundle', () => {
   it('fixture entry is valid', () => expect(validateEntry(entry())).toEqual([]));
+
+  it('refuses a schema 1 bundle', () => {
+    const b = Buffer.from(JSON.stringify({ schema: 1, bundle_seq: 1, created: '2026-09-26', entries: [] }));
+    expect(verifyBundle(b, sign(b), PEM)).toEqual({ ok: false, error: expect.stringMatching(/schema 1 is not supported/) });
+  });
 
   it('verifies a good signature and rejects bad, tampered and foreign-key signatures', () => {
     const b = bundleBytes(1, [entry()]);
@@ -74,7 +80,7 @@ describe('bundle', () => {
     fs.writeFileSync(path.join(dir, 'atlas', 'bundle.json.sig'), sign(b1));
     expect(loadInstalledBundle(dir, PEM)).toBeUndefined();
     // user edits the stored bundle
-    fs.writeFileSync(path.join(dir, 'atlas', 'bundle.json'), Buffer.from(b2.toString().replace('recommended', 'optional')));
+    fs.writeFileSync(path.join(dir, 'atlas', 'bundle.json'), Buffer.from(b2.toString().replace('download helper', 'upload helper')));
     fs.writeFileSync(path.join(dir, 'atlas', 'bundle.json.sig'), sign(b2));
     expect(loadInstalledBundle(dir, PEM)).toBeUndefined();
   });
@@ -95,7 +101,7 @@ describe('bundle', () => {
 });
 
 describe('match', () => {
-  const bundle = (e: AtlasEntry[]): AtlasBundle => ({ schema: 1, bundle_seq: 1, created: '2026-09-26', entries: e });
+  const bundle = (e: AtlasEntry[]): AtlasBundle => ({ schema: 2, bundle_seq: 1, created: '2026-09-26', entries: e });
 
   it('matches by DisplayName regex and publisher, builds a neutral uninstall item', () => {
     const items = scanAtlas({ bundle: bundle([entry()]), listPrograms: () => [prog(), prog({ id: 'P-other', name: 'Notepad++', publisher: 'Don Ho' })], signersOf: () => new Map(), ...deps() });
@@ -103,30 +109,31 @@ describe('match', () => {
     const i = items[0]!;
     expect(i).toMatchObject({ id: atlasItemId('kr.example.clipdown', 'P-abc123'), category: 'atlas', op: 'uninstall', risk: 'caution', reversible: 'reinstall-only', bytes: 1024, targets: ['C:\\Program Files\\Clipdown'], allowRoot: 'C:\\Program Files\\Clipdown', needsAdmin: true });
     expect(i.id).toMatch(/^ATLAS-[0-9a-f]{6}$/);
-    expect(i.title).toContain('CLIPDOWN');
-    expect(i.title).toContain('user-removable software; listed as bundling');
-    expect(i.title).not.toMatch(/malware|scam|unwanted|악성/i);
+    expect(i.title).toBe('CLIPDOWN by Example Ads Co.: installed, 1 MB');
+    expect(i.atlas).toMatchObject({ entryId: 'kr.example.clipdown', context: expect.stringContaining('download helper'), advisories: [] });
+    expect(i.instructions).toContain('What it is: A download helper');
     expect(i.uninstall).toEqual({ entryId: 'kr.example.clipdown', kind: 'exe', file: UNINST, args: [], signers: [TP] });
   });
 
   it('does not match on publisher mismatch', () => {
-    const items = scanAtlas({ bundle: bundle([entry({ detect: { signers: [], uninstall_keys: [{ display_name: '^CLIPDOWN', publisher: 'Example Ads Co.' }] } })]), listPrograms: () => [prog({ publisher: 'Someone Else' })], ...deps() });
+    const items = scanAtlas({ bundle: bundle([entry({ detect: { signers: [], uninstall_keys: [{ display_name: '^CLIPDOWN', publisher: 'Example Ads Co.' }], root_certs: [] } })]), listPrograms: () => [prog({ publisher: 'Someone Else' })], ...deps() });
     expect(items).toEqual([]);
   });
 
   it('matches by signer thumbprint of the main executable', () => {
     const p = prog({ name: 'Renamed Helper', publisher: 'x', displayIcon: 'C:\\Program Files\\Clipdown\\helper.exe,0' });
-    const e = entry({ detect: { signers: [{ subject: 'CN=Nothing*', thumbprints: [TP] }], uninstall_keys: [] } });
+    const e = entry({ detect: { signers: [{ subject: 'CN=Nothing*', thumbprints: [TP] }], uninstall_keys: [], root_certs: [] } });
     const signersOf = (files: string[]) => new Map(files.map((f) => [f, f.endsWith('helper.exe') ? valid : undefined]));
     expect(scanAtlas({ bundle: bundle([e]), listPrograms: () => [p], signersOf, ...deps() })).toHaveLength(1);
     const untrusted = (files: string[]) => new Map(files.map((f) => [f, { ...valid, status: 'NotTrusted' }]));
     expect(scanAtlas({ bundle: bundle([e]), listPrograms: () => [p], signersOf: untrusted, ...deps() })).toEqual([]);
   });
 
-  it('not-recommended is danger; open dispute still shows; failed checks become report_only', () => {
-    const e = entry({ removal_recommendation: 'not-recommended', dispute: { status: 'open', url: 'https://example.org/d' } });
+  it('always caution; open dispute still shows; failed checks become report_only', () => {
+    const e = entry({ dispute: { status: 'open', url: 'https://example.org/d' } });
     const [i] = scanAtlas({ bundle: bundle([e]), listPrograms: () => [prog()], ...deps({ ...valid, thumbprint: OTHER_TP }) });
-    expect(i).toMatchObject({ risk: 'danger', op: 'report_only' });
+    expect(i).toMatchObject({ risk: 'caution', op: 'report_only' });
+    expect(i!.instructions).toContain('Vendor dispute (open): https://example.org/d');
     expect(i!.title).toContain('vendor dispute open');
     expect(i!.instructions).toMatch(/Settings > Apps > Installed apps/);
     expect(i!.uninstall).toBeUndefined();
@@ -182,7 +189,7 @@ describe('uninstall rules', () => {
 });
 
 describe('runUninstall', () => {
-  const b: AtlasBundle = { schema: 1, bundle_seq: 1, created: '2026-09-26', entries: [entry()] };
+  const b: AtlasBundle = { schema: 2, bundle_seq: 1, created: '2026-09-26', entries: [entry()] };
 
   it('runs the checked command without a shell and maps exit codes', () => {
     const [item] = scanAtlas({ bundle: b, listPrograms: () => [prog()], ...deps() });
