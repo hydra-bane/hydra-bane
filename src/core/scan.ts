@@ -3,15 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 
-// v0.1 Disk catalog subset (PLAN.md §3.1): user temp, npm cache, stale node_modules / Rust target.
+// v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
-export type Category = 'temp' | 'npm-cache' | 'node_modules' | 'target';
+export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-cache' | 'cargo-registry' | 'node_modules' | 'target';
 
 export interface ScanItem {
   id: string;
   category: Category;
   title: string;
-  op: 'quarantine' | 'tool_cmd';
+  op: 'quarantine' | 'tool_cmd' | 'delete_cache';
   targets: string[];
   allowRoot: string;
   command?: { file: string; args: string[] };
@@ -57,14 +57,41 @@ function scanTemp(ctx: Context): ScanItem[] {
   return [{ id: '', category: 'temp', title: `Temp files older than 24h (${old.length} entries)`, op: 'quarantine', targets: old, allowRoot: ctx.tempDir, ...m, risk: 'safe', reversible: 'move-back' }];
 }
 
-function scanNpmCache(ctx: Context): ScanItem[] {
-  // npm is a .cmd shim: run through cmd.exe with constant arguments only (PLAN.md §5.4), never shell: true.
-  const npm = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', 'npm config get cache'], { encoding: 'utf8', windowsHide: true, timeout: 20_000 });
-  const dir = npm.stdout?.trim();
-  if (!dir || !fs.existsSync(dir)) return [];
-  const m = measureTree(dir);
-  if (!m.bytes) return [];
-  return [{ id: '', category: 'npm-cache', title: 'npm cache', op: 'tool_cmd', targets: [dir], allowRoot: dir, command: { file: 'npm', args: ['cache', 'clean', '--force'] }, ...m, risk: 'safe', reversible: 'redownload' }];
+// Tool caches: locate with the tool itself, clean with its official command. cargo has none, so only its
+// re-downloadable subfolders are deleted directly (~/.cargo/bin is never touched).
+interface CacheSpec { category: Category; title: string; locate: (ctx: Context) => string[]; clean?: { file: string; args: string[] } }
+
+const CACHES: CacheSpec[] = [
+  { category: 'npm-cache', title: 'npm cache', locate: (ctx) => [ctx.locate('npm config get cache')].filter(isStr), clean: { file: 'npm', args: ['cache', 'clean', '--force'] } },
+  { category: 'pnpm-store', title: 'pnpm store (prune removes unreferenced packages: up to this size)', locate: (ctx) => [ctx.locate('pnpm store path')].filter(isStr), clean: { file: 'pnpm', args: ['store', 'prune'] } },
+  { category: 'pip-cache', title: 'pip cache', locate: (ctx) => [ctx.locate('pip cache dir')].filter(isStr), clean: { file: 'pip', args: ['cache', 'purge'] } },
+  { category: 'uv-cache', title: 'uv cache (prune removes unused entries: up to this size)', locate: (ctx) => [ctx.locate('uv cache dir')].filter(isStr), clean: { file: 'uv', args: ['cache', 'prune'] } },
+  {
+    category: 'cargo-registry', title: 'cargo registry and git checkouts',
+    locate: (ctx) => {
+      const home = process.env.CARGO_HOME ?? path.join(ctx.home, '.cargo');
+      return [['registry', 'cache'], ['registry', 'src'], ['git', 'checkouts']].map((p) => path.join(home, ...p));
+    },
+  },
+];
+
+const isStr = (x: string | undefined): x is string => !!x;
+
+function scanCaches(ctx: Context, want: (c: Category) => boolean): ScanItem[] {
+  const items: ScanItem[] = [];
+  for (const c of CACHES) {
+    if (!want(c.category)) continue;
+    for (const dir of c.locate(ctx).filter((d) => path.isAbsolute(d) && fs.existsSync(d))) {
+      const m = measureTree(dir);
+      if (!m.bytes) continue;
+      // Each item may only touch its own folder: allowRoot === target.
+      items.push(c.clean
+        ? { id: '', category: c.category, title: c.title, op: 'tool_cmd', targets: [dir], allowRoot: dir, command: c.clean, ...m, risk: 'safe', reversible: 'redownload' }
+        : { id: '', category: c.category, title: `${c.title} (${path.basename(path.dirname(dir))}/${path.basename(dir)})`, op: 'delete_cache', targets: [dir], allowRoot: dir, ...m, risk: 'safe', reversible: 'redownload' });
+      if (c.clean) break; // tool commands clean the whole cache once
+    }
+  }
+  return items;
 }
 
 function git(cwd: string, args: string[]): { status: number | null; out: string } {
@@ -117,13 +144,13 @@ function scanProjects(ctx: Context): ScanItem[] {
   return items;
 }
 
-const PREFIX: Record<Category, string> = { temp: 'T', 'npm-cache': 'N', node_modules: 'P', target: 'P' };
+const PREFIX: Record<Category, string> = { temp: 'T', 'npm-cache': 'C', 'pnpm-store': 'C', 'pip-cache': 'C', 'uv-cache': 'C', 'cargo-registry': 'C', node_modules: 'P', target: 'P' };
 
 export function scan(ctx: Context, only?: Category[]): ScanItem[] {
   const want = (c: Category) => !only || only.includes(c);
   const items = [
     ...(want('temp') ? scanTemp(ctx) : []),
-    ...(want('npm-cache') ? scanNpmCache(ctx) : []),
+    ...scanCaches(ctx, want),
     ...(want('node_modules') || want('target') ? scanProjects(ctx).filter((i) => want(i.category)) : []),
   ];
   const counters: Record<string, number> = {};

@@ -52,7 +52,7 @@ function hardenBase(base: string) {
 }
 
 /** Resolve links in the parent chain; if it differs from the literal path, something redirects it. */
-function parentIsRedirected(p: string): boolean {
+export function parentIsRedirected(p: string): boolean {
   const parent = path.win32.dirname(p);
   try {
     return pathKey(fs.realpathSync.native(parent)) !== pathKey(parent);

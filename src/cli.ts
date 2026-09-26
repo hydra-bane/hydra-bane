@@ -40,6 +40,13 @@ function context(a: Args): Context {
   return {
     stateDir,
     tempDir: os.tmpdir(),
+    home: os.homedir(),
+    locate: (command) => {
+      // Constant tool queries only (see CACHES in core/scan.ts); .cmd shims need cmd.exe.
+      const r = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], { encoding: 'utf8', windowsHide: true, timeout: 20_000 });
+      const out = r.status === 0 ? (r.stdout ?? '').trim().split(/\r?\n/).pop() : undefined;
+      return out || undefined;
+    },
     roots: a.roots.length ? a.roots.map((r) => path.resolve(r)) : defaultRoots(),
     protectedPaths: defaultProtected(),
     sid: currentUserSid(),
@@ -178,7 +185,8 @@ ${summary}`,
 
     default:
       process.stdout.write(['hydra-bane — safe Windows cleanup for humans and AI agents', '',
-        '  scan   [--only temp,npm-cache,node_modules,target] [--root <dir>]...   find reclaimable space (read-only)',
+        '  scan   [--only temp,npm-cache,pnpm-store,pip-cache,uv-cache,cargo-registry,node_modules,target] [--root <dir>]...',
+        '                          find reclaimable space (read-only)',
         '  plan   --select <ids> | --all-safe                                      seal a plan (read-only)',
         '  apply  <plan-id> [--yes]   ask the human (via your agent or this terminal), quarantine, write receipts',
         '  undo   <tx> [--yes]        restore a transaction',

@@ -38,6 +38,8 @@ beforeEach(() => {
   ctx = {
     stateDir: path.join(root, 'state'),
     tempDir: temp,
+    home: path.join(root, 'home'),
+    locate: () => undefined,
     roots: [path.join(root, 'work')],
     protectedPaths: [path.join(root, 'protected')],
     sid: 'S-1-5-21-test',
@@ -120,5 +122,33 @@ describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', ()
     const r = await apply({ ...ctx, run: (f, args) => { ran.push([f, ...args].join(' ')); fs.rmSync(path.join(cache, 'blob')); return { status: 0, stderr: '' }; } }, makePlan(ctx, [item]).id);
     expect(ran).toEqual(['npm cache clean --force']);
     expect(r).toMatchObject({ ok: true, freedNowBytes: 4096 });
+  });
+  it('locates tool caches through the tool and cleans them with the official command', () => {
+    const pip = path.join(root, 'pipcache');
+    fs.mkdirSync(pip);
+    fs.writeFileSync(path.join(pip, 'wheel'), 'w'.repeat(100));
+    const items = scan({ ...ctx, locate: (cmd) => (cmd === 'pip cache dir' ? pip : undefined) }, ['pip-cache', 'npm-cache']);
+    expect(items).toEqual([expect.objectContaining({ id: 'C1', category: 'pip-cache', op: 'tool_cmd', targets: [pip], allowRoot: pip, command: { file: 'pip', args: ['cache', 'purge'] } })]);
+  });
+
+  it('deletes cargo registry folders directly, never ~/.cargo/bin, and never follows a junction inside', async () => {
+    const cargo = path.join(ctx.home, '.cargo');
+    const cache = path.join(cargo, 'registry', 'cache');
+    fs.mkdirSync(path.join(cache, 'index.crates.io'), { recursive: true });
+    fs.writeFileSync(path.join(cache, 'index.crates.io', 'serde.crate'), 's'.repeat(500));
+    fs.mkdirSync(path.join(cargo, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(cargo, 'bin', 'cargo.exe'), 'bin');
+    const outside = path.join(root, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'precious.txt'), 'keep');
+    fs.symlinkSync(outside, path.join(cache, 'sneaky'), 'junction');
+
+    const items = scan(ctx, ['cargo-registry']);
+    expect(items.map((i) => i.targets[0])).toEqual([cache]);
+    const r = await apply(ctx, makePlan(ctx, items).id);
+    expect(r).toMatchObject({ ok: true, freedNowBytes: 500 });
+    expect(fs.existsSync(cache)).toBe(false);
+    expect(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8')).toBe('keep');
+    expect(fs.existsSync(path.join(cargo, 'bin', 'cargo.exe'))).toBe(true);
   });
 });

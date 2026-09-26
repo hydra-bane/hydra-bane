@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Ledger } from '../ledger/ledger.ts';
-import { defaultQuarantineBase, Quarantine, restore, type RestoreOutcome } from '../quarantine/quarantine.ts';
+import { decide } from '../guard/decide.ts';
+import { defaultQuarantineBase, parentIsRedirected, Quarantine, restore, type RestoreOutcome } from '../quarantine/quarantine.ts';
 import { policyFor, type Context } from './context.ts';
 import { loadPlan, summarize, type LoadResult } from './plan.ts';
 import { measureTree } from './scan.ts';
@@ -64,6 +65,29 @@ export async function apply(ctx: Context, planId: string): Promise<ApplyResult> 
           if (ok) freedNowBytes += Math.max(0, now.bytes - after.bytes);
           ledger.append(plan.id, ok ? 'done' : 'failed', { item: item.id, target, command: item.command, status: r.status, freed: now.bytes - after.bytes });
           outcomes.push({ id: item.id, target, ok, ...(ok ? { bytes: now.bytes - after.bytes } : { code: 'TOOL_FAILED', detail: r.stderr.slice(0, 300) }) });
+          continue;
+        }
+
+        if (item.op === 'delete_cache') {
+          // Re-downloadable cache folders with no official clean command (cargo). Guarded like a move;
+          // fs.rmSync removes links as links and never follows them into their targets.
+          const d = decide(target, 'disk', policy);
+          const bad = !d.allowed ? `GUARD ${d.code}` : parentIsRedirected(target) ? 'PARENT_IS_LINK' : undefined;
+          if (bad) {
+            ledger.append(plan.id, 'failed', { item: item.id, target, code: bad });
+            outcomes.push({ id: item.id, target, ok: false, code: bad });
+            continue;
+          }
+          try {
+            fs.rmSync(target, { recursive: true, force: false, maxRetries: 2 });
+            freedNowBytes += now.bytes;
+            ledger.append(plan.id, 'done', { item: item.id, target, op: 'delete_cache', freed: now.bytes });
+            outcomes.push({ id: item.id, target, ok: true, bytes: now.bytes });
+          } catch (e) {
+            const code = (e as NodeJS.ErrnoException).code ?? 'IO';
+            ledger.append(plan.id, 'failed', { item: item.id, target, code });
+            outcomes.push({ id: item.id, target, ok: false, code });
+          }
           continue;
         }
 

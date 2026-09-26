@@ -11,6 +11,9 @@ export interface Confirmer {
 export interface Context {
   stateDir: string;      // %LOCALAPPDATA%\hydra-bane
   tempDir: string;       // user %TEMP%
+  home: string;          // user profile
+  /** Runs a constant tool query (e.g. 'pip cache dir') and returns trimmed stdout, or undefined if the tool is missing. */
+  locate: (command: string) => string | undefined;
   roots: string[];       // project roots for build artifacts (--root)
   protectedPaths: string[];
   sid: string;
