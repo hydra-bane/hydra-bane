@@ -1,0 +1,9 @@
+{
+  "name": "hydra-bane-spikes",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fdir": "^6.5.0",
+    "koffi": "^3.3.1"
+  }
+}
