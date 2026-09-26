@@ -8,6 +8,13 @@ const CASES: Array<[string, 'ask' | 'deny' | 'allow']> = [
   ['npx -y hydra-bane@0.1.0 apply lx3k9a2b --yes', 'ask'],
   ['hydra-bane undo lx3k9a2b --yes', 'ask'],
   ['hydra-bane scan --json', 'allow'],
+  ['cd E:\\proj && hydra-bane apply lx3k9a2b --yes', 'ask'],
+  ['C:\\Users\\pc\\.claude\\plugins\\cache\\hydra-bane\\bin\\hydra-bane.cmd undo tx1', 'ask'],
+  // mentions in text are not invocations (false positive seen 2026-09-26 on a git commit)
+  ['git commit -m "document that hydra-bane apply asks first"', 'allow'],
+  ["git commit -q -F - <<'EOF'\nREADME: hook asks before\n  hydra-bane apply even in bypass mode\nEOF\ngit push", 'allow'],
+  ['echo "run: hydra-bane undo <tx> --yes"', 'allow'],
+  ['grep -n "hydra-bane apply" README.md', 'allow'],
   ['hydra-bane plan --select C1,T1', 'allow'],
 
   [`rm -rf "$(cygpath -u 'C:\\')" 2>/dev/null`, 'deny'], // anthropics/claude-code#95426

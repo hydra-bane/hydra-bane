@@ -8,6 +8,7 @@ import type { Context } from '../src/core/context.ts';
 import { makePlan } from '../src/core/plan.ts';
 import { scan, type ScanItem } from '../src/core/scan.ts';
 import { Ledger } from '../src/ledger/ledger.ts';
+import { describeAction } from '../src/hook/describe.ts';
 
 // End-to-end scan -> plan -> apply -> undo, entirely inside a temp folder with a fake confirmer.
 let root: string, repo: string, ctx: Context, confirmed: string[];
@@ -95,6 +96,27 @@ describe.runIf(process.platform === 'win32')('scan -> plan -> apply -> undo', ()
     expect(fs.existsSync(path.join(repo, 'node_modules', 'pkg', 'index.js'))).toBe(true);
     expect(fs.existsSync(path.join(ctx.tempDir, 'old.tmp'))).toBe(true);
     expect(ledger.verify()).toMatchObject({ ok: true, count: 6 });
+  });
+
+  it('describes exactly what apply and undo will do, for the approval prompt', async () => {
+    const plan = makePlan(ctx, scan(ctx, ['temp', 'node_modules']));
+    const text = describeAction('apply', plan.id, ctx.stateDir);
+    expect(text).toContain(`plan ${plan.id} (${plan.hash.slice(0, 8)})`);
+    expect(text).toContain(`TEMP`);
+    expect(text).toContain(`${path.join(ctx.tempDir, 'old.tmp')} to quarantine (undoable)`);
+    expect(text).toContain(`${path.join(repo, 'node_modules')} to quarantine (undoable)`);
+    expect(describeAction('apply', 'nosuchplan', ctx.stateDir)).toContain('not found');
+
+    const file = path.join(ctx.stateDir, 'plans', `${plan.id}.json`);
+    const original = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, original.replace('"schemaVersion": 1', '"schemaVersion": 1, "x": 1'));
+    expect(describeAction('apply', plan.id, ctx.stateDir)).toContain('WARNING: this plan was edited');
+    fs.writeFileSync(file, original);
+
+    await apply(ctx, plan.id);
+    const u = describeAction('undo', plan.id, ctx.stateDir);
+    expect(u).toContain('restore 2 item(s)');
+    expect(u).toContain(path.join(repo, 'node_modules'));
   });
 
   it('asks for a star only after the first success', async () => {

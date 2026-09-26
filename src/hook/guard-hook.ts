@@ -2,9 +2,20 @@
 // it forces a human prompt for hydra-bane apply/undo/purge and blocks common recursive deletes aimed at
 // drive roots, profile/known folders, or paths the hook cannot see because they are computed at runtime.
 
+import { describeAction } from './describe.ts';
+
 export type Verdict = { decision: 'ask' | 'deny'; reason: string } | undefined;
 
-const HB_MUTATING = /\bhydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(apply|undo|purge)\b/i;
+// Only an actual invocation counts: at the start of a command segment, optionally via npx or a path.
+// Mentions inside quoted text or heredoc bodies (commit messages, docs) must not trigger a prompt.
+const HB_MUTATING = /(?:^|[;&|\n(]\s*)(?:npx\s+(?:-y\s+)?)?(?:[^\s;&|]*[\\/])?hydra-bane(?:@[\w.-]+)?(?:\.cmd|\.ps1)?\s+(apply|undo|purge)\b(?:\s+([a-z0-9]+))?/i;
+
+/** Remove heredoc bodies and quoted strings so only the command structure is inspected. */
+export function commandSkeleton(command: string): string {
+  let s = command.replace(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n[\s\S]*?\n\s*\1\s*(?:\n|$)/g, '\n');
+  s = s.replace(/'[^']*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  return s.trim();
+}
 const OPAQUE = /\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc(?:odedcommand)?)?\s/i; // payload the hook cannot read
 
 const RECURSIVE_DELETE = [
@@ -28,9 +39,12 @@ const DANGEROUS_TARGET = [
   /[\\/]windows(?:[\\/]system32)?[\\/]?(?=$|[\s"'])|program files/i,
 ];
 
-export function judge(command: string): Verdict {
-  if (HB_MUTATING.test(command)) {
-    return { decision: 'ask', reason: 'Hydra-bane changes files. Show the user the plan summary and let them approve this command.' };
+export function judge(command: string, describe: (action: string, id: string | undefined) => string = describeAction): Verdict {
+  const m = HB_MUTATING.exec(commandSkeleton(command));
+  if (m) {
+    let what: string;
+    try { what = describe(m[1]!, m[2]); } catch { what = `Hydra-bane ${m[1]} ${m[2] ?? ''}`; }
+    return { decision: 'ask', reason: `${what}\nApprove only if this is what you want.` };
   }
   if (OPAQUE.test(command)) {
     return { decision: 'ask', reason: 'This PowerShell command is encoded, so its contents cannot be checked. Ask the user before running it.' };
