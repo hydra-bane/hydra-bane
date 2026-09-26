@@ -112,7 +112,7 @@ describe('match', () => {
     expect(i.title).toBe('CLIPDOWN by Example Ads Co.: no root certificate, local server or startup service found in its folder');
     expect(i.atlas).toMatchObject({ entryId: 'kr.example.clipdown', context: expect.stringContaining('download helper'), advisories: [] });
     expect(i.instructions).toContain('What it is: A download helper');
-    expect(i.uninstall).toEqual({ entryId: 'kr.example.clipdown', kind: 'exe', file: UNINST, args: [], signers: [TP] });
+    expect(i.uninstall).toEqual({ entryId: 'kr.example.clipdown', trust: 'atlas', kind: 'exe', file: UNINST, args: [], signers: [TP] });
   });
 
   it('does not match on publisher mismatch', () => {
@@ -145,7 +145,7 @@ describe('uninstall rules', () => {
 
   it('MSI command comes only from the product code, never from UninstallString', () => {
     const p = prog({ keyName: GUID, msiProductCode: GUID, uninstallString: 'cmd.exe /c evil & MsiExec.exe /X{...}' });
-    expect(buildUninstall(p, msiEntry([GUID]), deps())).toEqual({ entryId: 'kr.example.clipdown', kind: 'msi', file: 'C:\\Windows\\System32\\msiexec.exe', args: ['/x', GUID], signers: [] });
+    expect(buildUninstall(p, msiEntry([GUID]), deps())).toEqual({ entryId: 'kr.example.clipdown', trust: 'atlas', kind: 'msi', file: 'C:\\Windows\\System32\\msiexec.exe', args: ['/x', GUID], signers: [] });
     expect(buildUninstall(p, msiEntry(), deps())).toMatchObject({ kind: 'msi' }); // none listed, key matched
     expect(buildUninstall(p, msiEntry(['{99999999-2222-3333-4444-555555555555}']), deps())).toHaveProperty('reason');
     expect(buildUninstall(prog({ msiProductCode: undefined }), msiEntry(), deps())).toHaveProperty('reason');

@@ -75,12 +75,28 @@ reinstall it). Items with `op: "uninstall"` go through the same plan → ask →
 signed uninstaller (Windows may show its administrator prompt and the vendor's window). Items with
 `op: "report_only"` cannot be removed safely by Hydra-bane: give the user `instructions`.
 
+## Uninstalling any program
+
+When the user names a program to remove (Atlas item or not):
+
+1. `hydra-bane programs --json` and find it by name (`data.programs[].id`, `P-xxxxxx`). If several match, ask
+   which one.
+2. `hydra-bane uninstall <id> --json` (read-only): seals a one-item plan. Show the user `data.summary` and the
+   exact command in `data.item.title` (`runs <file> <args> [trust: msi|signed|admin-folder]`), and ask.
+   - `data.item.op` is `"report_only"`: Hydra-bane will not run this uninstaller; give the user
+     `data.item.instructions` (Settings > Apps). Do not improvise uninstall, `msiexec`, registry or delete commands.
+   - `data.atlas_entry` is set: the program is in the Atlas; mention that `scan --only atlas` shows what it does on
+     this PC, but the plan is still valid.
+3. After the user approves: `hydra-bane apply <plan-id> --yes --json`. The vendor's window opens (Windows may ask
+   for administrator approval); the user finishes there. `stillInstalled: true` means it was cancelled or is
+   still running.
+4. Then offer the leftovers: `hydra-bane scan --only leftovers --json` and the usual plan → ask → apply loop.
+
 ## Unwanted programs not in the Atlas: report (ask once)
 
 When the user wants to get rid of a program they did not want (bundled, adware, "how did this get here?"):
 
-1. `hydra-bane programs --json` and find it by name. If it is not an Atlas item, removal is not automated: point
-   the user to Settings > Apps > Installed apps, and do not improvise uninstall or delete commands.
+1. Remove it as in "Uninstalling any program" above.
 2. Unless `hydra-bane report <id> --json` shows `data.previous` (already reported or declined), offer **once**:
    "Want to report this program to the Hydra-bane Atlas so others can spot it? This is exactly what would be
    posted publicly:" followed by `data.report` in full. Ask with "Report it" / "Don't report". The user may add a

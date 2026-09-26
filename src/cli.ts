@@ -6,13 +6,14 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { apply, readPrefs, recover, starAsked, undo, writePrefs } from './core/apply.ts';
-import { atlasStatus, updateBundle } from './atlas/bundle.ts';
+import { atlasStatus, loadInstalledBundle, updateBundle } from './atlas/bundle.ts';
 import { isElevated } from './core/admin.ts';
 import { elevatedApplyCommand, installHelper, launchElevated, parseAdminApplyArgs, readAdminResult, runAdminApply } from './admin/helper.ts';
 import { buildProtectedPaths } from './guard/protected.ts';
 import { listPrograms } from './atlas/programs.ts';
-import { buildReport, countryCode, submit } from './atlas/report.ts';
-import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
+import { authenticode, buildReport, countryCode, mainExecutable, submit } from './atlas/report.ts';
+import { appItem, commandLine } from './atlas/uninstall.ts';
+import { keyMatches, signerMatches } from './atlas/entry.ts';import { defaultProtected, defaultRoots, type Context } from './core/context.ts';
 import { loadPlan, makePlan, summarize } from './core/plan.ts';
 import { scan, type Category } from './core/scan.ts';
 import { explain } from './core/explain.ts';
@@ -216,6 +217,26 @@ ${summary}`,
       return 0;
     }
 
+    case 'uninstall': {
+      // PLAN.md §7.3 for any installed program: seals a one-item plan, never runs anything itself.
+      const ctx = context(a);
+      const id = a.pos[0] ?? '';
+      const prog = listPrograms().find((p) => p.id === id);
+      if (!prog) { emit(a, 'uninstall', false, null, `No installed program ${id}. Run: hydra-bane programs`, { error: { code: 'NOT_FOUND', message: 'run programs to see current ids' } }); return 1; }
+      const bundle = loadInstalledBundle(ctx.stateDir);
+      const exe = bundle?.entries.some((e) => e.detect.signers.length) ? mainExecutable(prog) : undefined;
+      const signer = exe ? authenticode(exe) : undefined;
+      const atlas = bundle?.entries.find((e) => keyMatches(e, prog) || signerMatches(e, signer));
+      const item = appItem(prog);
+      const plan = makePlan(ctx, [item]);
+      const note = atlas ? `This program is in the Atlas (${atlas.id}). "hydra-bane scan --only atlas" shows what it does on this PC; you may still use this plan.` : undefined;
+      emit(a, 'uninstall', true, { plan_id: plan.id, hash: plan.hash, items: [item.id], expires_at: plan.expiresAt, item, summary: summarize(plan), ...(atlas ? { atlas_entry: atlas.id } : {}) },
+        [summarize(plan), item.op === 'uninstall' ? `Runs: ${commandLine(item.uninstall!)}` : item.instructions, ...(note ? [note] : []),
+          `\nPlan ${plan.id} (${plan.hash.slice(0, 8)}), expires ${plan.expiresAt}.`,
+          item.op === 'uninstall' ? `Nothing was changed. A human applies it with: hydra-bane apply ${plan.id}` : 'Nothing was changed. Hydra-bane cannot run this uninstaller safely; follow the instructions above.'].join('\n'));
+      return 0;
+    }
+
     case 'report': {
       // PLAN.md §7.7: preview by default; sending needs --submit plus the user's approval.
       const ctx = context(a);
@@ -355,6 +376,7 @@ ${summary}`,
         '  (quarantine older than 7 days shows up in scan as Q-xxxxxxxx; purging it is permanent)',
         '  ledger                  verify and show receipts',
         '  programs                   list installed programs (read-only)',
+        '  uninstall <program-id>     seal a plan that runs the program\'s own uninstaller after checks (read-only)',
         '  report <program-id> [--note <text>] [--submit [--yes]] | --no',
         '                          preview an Atlas report of an unwanted program; --submit posts it after approval',
         '  atlas update | status      download and verify the signed Atlas bundle, or show what is installed',

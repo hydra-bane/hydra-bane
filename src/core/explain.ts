@@ -32,7 +32,7 @@ export function explain(item: ScanItem) {
     what: t.what,
     why_safe: t.why,
     what_happens: item.instructions && t.why !== item.instructions ? `${t.after} ${item.instructions}`.trim() : t.after,
-    how: item.op === 'uninstall' && item.uninstall ? `runs the vendor uninstaller "${[item.uninstall.file, ...item.uninstall.args].join(' ')}"` : item.op === 'report_only' ? 'reports only; Hydra-bane changes nothing' : item.op === 'tool_cmd' && item.command ? `runs "${[item.command.file, ...item.command.args].join(' ')}"` : item.op === 'quarantine' ? 'moves to quarantine' : 'deletes the folder',
+    how: item.op === 'uninstall' && item.uninstall ? `runs the vendor uninstaller "${[item.uninstall.file, ...item.uninstall.args].join(' ')}"` : item.op === 'report_only' ? 'reports only; Hydra-bane changes nothing' : item.op === 'reg_delete' ? `exports ${(item.regKeys ?? []).join(', ')} to quarantine, then deletes it (undo imports it back)` : item.op === 'tool_cmd' && item.command ? `runs "${[item.command.file, ...item.command.args].join(' ')}"` : item.op === 'quarantine' ? 'moves to quarantine' : 'deletes the folder',
     reversible: item.reversible,
     bytes: item.bytes,
     targets: item.targets.slice(0, 20),

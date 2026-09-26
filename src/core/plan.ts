@@ -59,11 +59,12 @@ export function loadPlan(ctx: Context, id: string): LoadResult {
 const gb = (b: number) => `${(b / 2 ** 30).toFixed(2)} GB`;
 
 export function summarize(plan: Plan): string {
-  const now = plan.items.filter((i) => i.reversible !== 'move-back').reduce((s, i) => s + i.bytes, 0);
+  const uninstalls = plan.items.filter((i) => i.op === 'uninstall');
+  const now = plan.items.filter((i) => i.reversible !== 'move-back' && i.op !== 'uninstall').reduce((s, i) => s + i.bytes, 0);
   const later = plan.items.filter((i) => i.reversible === 'move-back').reduce((s, i) => s + i.bytes, 0);
   const lines = [
     `Hydra-bane plan ${plan.hash.slice(0, 8)}`,
-    `Reclaim now: ${gb(now)} (caches and expired quarantine) | Moved to quarantine: ${gb(later)} (undoable for 7 days)`,
+    `Reclaim now: ${gb(now)} (caches and expired quarantine) | Moved to quarantine: ${gb(later)} (undoable for 7 days)${uninstalls.length ? ` | Uninstalls: ${uninstalls.length} program(s), cannot be undone` : ''}`,
     ...plan.items.slice(0, 10).map((i) => `${i.risk === 'caution' ? '[caution] ' : ''}${i.reversible === 'none' ? '[PERMANENT] ' : ''}${i.id} ${i.title} - ${gb(i.bytes)}`),
     ...(plan.items.length > 10 ? [`... and ${plan.items.length - 10} more`] : []),
   ];

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { planHash, type Plan } from '../core/plan.ts';
 import { Ledger } from '../ledger/ledger.ts';
+import { commandLine, trustText } from '../atlas/uninstall.ts';
 
 // Text for the approval prompt: exactly what a hydra-bane apply/undo/purge is about to do,
 // read from the sealed plan or the ledger, so the human approves specifics, not a generic warning.
@@ -28,7 +29,10 @@ Windows will ask for administrator approval. These changes cannot be undone.`;
     const lines = [`Hydra-bane will apply plan ${id} (${hash.slice(0, 8)}):`];
     if (planHash(body) !== hash) lines.push('WARNING: this plan was edited after it was made; hydra-bane will refuse it.');
     for (const i of plan.items) {
-      const what = i.op === 'tool_cmd' && i.command ? `runs "${[i.command.file, ...i.command.args].join(' ')}" on ${i.targets[0]} (re-downloadable, not undoable)`
+      const what = i.op === 'uninstall' && i.uninstall ? `UNINSTALLS ${i.program?.name ?? i.title} by running "${commandLine(i.uninstall)}" (trust: ${i.uninstall.trust}, ${trustText(i.uninstall)}; cannot be undone, reinstall to get it back)`
+        : i.op === 'report_only' ? 'nothing (report only)'
+        : i.op === 'reg_delete' ? `exports then DELETES registry key${(i.regKeys ?? []).length > 1 ? 's' : ''} ${(i.regKeys ?? []).join(', ')} (undoable: the export is re-imported)`
+        : i.op === 'tool_cmd' && i.command ? `runs "${[i.command.file, ...i.command.args].join(' ')}" on ${i.targets[0]} (re-downloadable, not undoable)`
         : i.op === 'delete_cache' ? `deletes ${i.targets[0]} (re-downloadable, not undoable)`
         : i.op === 'purge_quarantine' ? `PERMANENTLY deletes quarantined files in ${i.targets[0]} (undo window is over; cannot be undone)`
         : `moves ${i.targets.length === 1 ? i.targets[0] : `${i.targets.length} entries in ${path.dirname(i.targets[0]!)}`} to quarantine (undoable)`;
@@ -36,7 +40,7 @@ Windows will ask for administrator approval. These changes cannot be undone.`;
     }
     const total = plan.items.reduce((s, i) => s + i.bytes, 0);
     const undoable = plan.items.some((i) => i.op === 'quarantine');
-    lines.push(`Total up to ${gb(total)}.${undoable ? ` Undo quarantined items with: hydra-bane undo ${id}` : ' Nothing here can be undone; caches are re-downloaded when needed.'}`);
+    lines.push(`Total up to ${gb(total)}.${undoable ? ` Undo quarantined items with: hydra-bane undo ${id}` : ` Nothing here can be undone${plan.items.every((i) => i.op === 'uninstall' || i.op === 'report_only') ? '' : '; caches are re-downloaded when needed'}.`}`);
     return clip(lines);
   }
 

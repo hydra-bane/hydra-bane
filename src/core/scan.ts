@@ -9,6 +9,7 @@ import { ADMIN_CATEGORIES, scanAdmin } from './admin.ts';
 import { scanAtlas, type AtlasItemData } from '../atlas/match.ts';
 import { loadInstalledBundle } from '../atlas/bundle.ts';
 import { scanCachesV02 } from './caches-v02.ts';
+import { scanLeftovers } from './leftovers.ts';
 
 // v0.1 Disk catalog subset (PLAN.md §3.1): user temp, package-manager caches, stale node_modules / Rust target.
 
@@ -18,11 +19,20 @@ export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-c
   // v0.2 admin items (PLAN.md §3.1, §6.7)
   | 'system-temp' | 'windows-update' | 'delivery-optimization' | 'system-dumps' | 'wer-archive' | 'winsxs' | 'hibernation' | 'windows-old' | 'wsl-disk' | 'docker-disk'
   // v0.2 Atlas (PLAN.md §7)
-  | 'atlas';
+  | 'atlas'
+  // v0.3 general uninstall and what programs leave behind
+  | 'app' | 'leftovers';
 
 /** Vendor uninstaller that passed the PLAN.md §7.3 checks at scan time; apply re-checks everything. */
 export interface UninstallSpec {
-  entryId: string;
+  /** Atlas entry that vouches for this uninstaller; absent for a general uninstall (category 'app'). */
+  entryId?: string;
+  /**
+   * Why this uninstaller may run (PLAN.md §7.3): 'atlas' = signer pinned by the entry; 'msi' = msiexec /x {ProductCode}
+   * built by Hydra-bane; 'signed' = valid Authenticode signature matching the program's publisher; 'admin-folder' = HKLM key
+   * and an executable in a folder only administrators can write.
+   */
+  trust: 'atlas' | 'msi' | 'signed' | 'admin-folder';
   kind: 'msi' | 'exe';
   /** Absolute path of the executable to run (msiexec.exe for MSI). */
   file: string;
@@ -35,7 +45,7 @@ export interface ScanItem {
   id: string;
   category: Category;
   title: string;
-  op: 'quarantine' | 'tool_cmd' | 'delete_cache' | 'purge_quarantine' | 'uninstall' | 'report_only';
+  op: 'quarantine' | 'tool_cmd' | 'delete_cache' | 'purge_quarantine' | 'uninstall' | 'report_only' | 'reg_delete';
   targets: string[];
   allowRoot: string;
   command?: { file: string; args: string[] };
@@ -56,6 +66,10 @@ export interface ScanItem {
   instructions?: string;
   /** Atlas items: facts measured on this PC and quoted third-party advisories, as data for agents. */
   atlas?: AtlasItemData;
+  /** The installed program an uninstall or leftovers item is about (recorded in the ledger for the leftovers scan). */
+  program?: { id: string; name: string; publisher?: string | undefined; version?: string | undefined; hive: 'HKLM' | 'HKCU'; view: '64' | '32'; keyName: string; installLocation?: string | undefined };
+  /** reg_delete: registry keys (HKCU only) exported to quarantine before deletion, so undo can import them back. */
+  regKeys?: string[];
 }
 
 const DAY = 86_400_000;
@@ -253,6 +267,7 @@ export function scan(ctx: Context, only?: Category[]): ScanItem[] {
     ...(want('quarantine') ? scanQuarantine(ctx) : []),
     ...(ADMIN_CATEGORIES.some(want) ? scanAdmin({}, only) : []),
     ...(want('atlas') ? scanAtlas({ bundle: loadInstalledBundle(ctx.stateDir), cacheDir: ctx.stateDir }) : []),
+    ...(want('leftovers') ? scanLeftovers(ctx) : []),
   ];
   for (const i of items) if (!i.id) i.id = stableId(i);
   return items;

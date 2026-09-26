@@ -109,6 +109,12 @@ Hydra-bane does not judge the program. You decide whether to keep it.
 
 Found something the Atlas doesn't know? When you ask your agent to get rid of it, Hydra-bane offers to report it. You see exactly what would be posted first: name, publisher, code signer, file hash and `%VAR%`-relative paths. It never includes your user name, PC name or real paths, and nothing is sent unless you say yes. A bot collects reports into one candidate pull request per program for maintainers to review.
 
+### Uninstall any program
+
+You don't need the Atlas to remove a program. `hydra-bane uninstall <program-id>` (ids from `programs`) seals a one-item plan that runs the program's own uninstaller, and `apply` runs it after you approve. The registry entry is data, never a command: Hydra-bane runs the uninstaller only if it is a Windows Installer product (Hydra-bane builds `msiexec /x {product code}` itself), carries a valid signature from the program's own publisher, or is installed for all users in a folder only administrators can change. Shells, script hosts and arguments pointing outside the program's folder are refused, and everything is checked again right before it runs. The approval prompt shows the exact command line. Otherwise you get the Settings > Apps steps instead.
+
+After an uninstall, `hydra-bane scan --only leftovers` finds what that program left behind: folders named exactly after it in AppData, shortcuts that now point nowhere, and its keys under `HKCU\Software`. Folders go to quarantine and registry keys are exported before deletion, so `undo` brings both back. Folders holding your documents or a git repository, and machine-wide folders, are only reported. Hydra-bane looks only at programs it removed itself; it does not guess across all of AppData.
+
 ## Why not just let my agent `rm -rf`?
 
 Your agent can already delete files. The problem is that nobody knows what it deleted until it is gone.
@@ -131,7 +137,7 @@ Hydra-bane is not the first cleanup tool for Windows, and it does not try to rep
 | Made for AI agents (JSON output, plugin, MCP) | Yes | No | No | No | No (XML export only) | n/a |
 | Preview before changes | `scan` and `plan` are read-only | `--dry-run` for clean and optimize; uninstall asks y/N | Preview (GUI and `--preview`) | — | Confirmation, leftover list, optional simulation | Only if the agent chooses to |
 | Undo | Quarantine + `undo` for 7 days (caches are re-downloaded instead) | No: deletion is permanent | No | "Undo Selected Tweaks"; optional restore point | Optional restore point; leftovers go to the Recycle Bin | Not built in |
-| Leftovers after uninstall | Not yet (runs the vendor uninstaller; leftovers are not cleaned) | Yes | n/a (not an uninstaller) | — | Yes, each rated by confidence | Whatever the agent writes |
+| Leftovers after uninstall | Yes, for programs it removed: exact-name folders, dead shortcuts and user registry keys, all undoable | Yes | n/a (not an uninstaller) | — | Yes, each rated by confidence | Whatever the agent writes |
 | Per-country bundled-software catalog | Atlas (CC BY-SA 4.0) | — | — | — | — | No |
 | Status | Early (v0.2) | "Experimental", prerelease builds | Stable (6.0.4, Sept 2026) | Active (release 26.08.19) | Active (6.3, Sept 2026) | n/a |
 | License | Apache-2.0 | MIT (Windows branch) | GPL-3.0+ | MIT | Apache-2.0 | n/a |
@@ -181,6 +187,7 @@ Every command accepts `--json` and returns `{schema_version, command, ok, data, 
 | `analyze [dir]` | Browse what uses space (arrow keys) | No |
 | `ledger` | Verify and list receipts | No |
 | `programs` | List installed programs | No |
+| `uninstall <program-id>` | Seal a plan that runs the program's own uninstaller after the checks above | No (writes a plan file) |
 | `report <program-id>` | Preview an Atlas report of an unwanted program; `--submit` posts it after you approve | Only with `--submit` |
 | `atlas update` / `atlas status` | Download and verify the signed Atlas catalog, or show the installed one | Downloads the catalog |
 | `apply-admin <plan-id>` | Run a plan's administrator items (UAC prompt) | Yes |

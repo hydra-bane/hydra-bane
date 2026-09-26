@@ -45,7 +45,7 @@ describe('apply v0.2 ops', () => {
   it('refuses a vendor uninstaller when no signed Atlas bundle is installed', async () => {
     const plan = makePlan(ctx, [item({
       id: 'ATLAS-abc123', category: 'atlas', op: 'uninstall', reversible: 'reinstall-only', targets: ['HKLM\\x'], allowRoot: 'HKLM\\x', needsAdmin: true,
-      uninstall: { entryId: 'kr.vendor.product', kind: 'exe', file: 'C:\\Program Files\\V\\uninst.exe', args: [], signers: ['AB'.repeat(20)] },
+      uninstall: { entryId: 'kr.vendor.product', trust: 'atlas', kind: 'exe', file: 'C:\\Program Files\\V\\uninst.exe', args: [], signers: ['AB'.repeat(20)] },
     })]);
     const r = await apply(ctx, plan.id);
     if (!r.ok) throw new Error(r.detail);
