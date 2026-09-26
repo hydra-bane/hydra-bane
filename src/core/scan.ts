@@ -21,7 +21,9 @@ export type Category = 'temp' | 'npm-cache' | 'pnpm-store' | 'pip-cache' | 'uv-c
   // v0.2 Atlas (PLAN.md §7)
   | 'atlas'
   // v0.3 general uninstall and what programs leave behind
-  | 'app' | 'leftovers';
+  | 'app' | 'leftovers'
+  // Mole parity: old installers in Downloads, folders of programs removed outside Hydra-bane, maintenance actions
+  | 'installers' | 'orphans' | 'optimize';
 
 /** Vendor uninstaller that passed the PLAN.md §7.3 checks at scan time; apply re-checks everything. */
 export interface UninstallSpec {
